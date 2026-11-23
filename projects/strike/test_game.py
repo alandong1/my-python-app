@@ -388,3 +388,79 @@ def test_you_reports_money_and_loadout(arena, clock):
     assert data["money"] == C.START_MONEY
     assert data["slots"]["secondary"] == "pistol" and data["active"] == "secondary"
     assert data["scoped"] is False
+
+
+# ---------------------------------------------------------------- 两队、友军保护、电脑玩家
+
+def test_teams_are_balanced(arena, clock):
+    teams = [arena.add_player(f"p{i}").team for i in range(6)]
+    assert teams.count(0) == 3 and teams.count(1) == 3
+
+
+def test_no_friendly_fire(arena, clock):
+    a, b = two_players(arena, clock)
+    b.team = a.team                      # 同一队
+    a.pitch = math.atan2(1.0 - C.EYE_HEIGHT, 10.0)
+    arena.fire(a.id)
+    assert b.hp == C.MAX_HP
+    assert not [e for e in arena.take_events() if e["e"] == "hit"]
+
+
+def test_enemy_team_can_be_hit_and_team_kills_count(arena, clock):
+    a, b = two_players(arena, clock)
+    b.team = 1 - a.team
+    a.pitch = 0.0                        # 爆头
+    arena.fire(a.id)
+    assert b.hp == 0
+    assert arena.team_kills[a.team] == 1 and arena.team_kills[b.team] == 0
+
+
+def test_bots_fill_to_min_online_and_leave_when_humans_join(arena, clock):
+    arena.balance_bots()
+    assert len(arena.players) == C.MIN_ONLINE and arena.human_count() == 0
+    h1 = arena.add_player("甲")
+    arena.balance_bots()
+    assert len(arena.players) == C.MIN_ONLINE and arena.human_count() == 1
+    for i in range(2):
+        arena.add_player(f"人{i}")
+    arena.balance_bots()
+    assert len(arena.players) == C.MIN_ONLINE and arena.human_count() == 3
+    bots = [p for p in arena.players.values() if p.is_bot]
+    assert len(bots) == C.MIN_ONLINE - 3
+    assert abs(sum(1 for b in bots if b.team == 0) - sum(1 for b in bots if b.team == 1)) <= 1
+
+
+def test_bots_get_fewer_when_room_is_full_of_humans(arena, clock):
+    for i in range(C.MIN_ONLINE + 1):
+        arena.add_player(f"p{i}")
+    arena.balance_bots()
+    assert not [p for p in arena.players.values() if p.is_bot]
+
+
+def test_bots_patrol_and_shoot_at_enemies(arena, clock):
+    arena.balance_bots()
+    human = arena.add_player("甲")
+    place(human, 0.0, 20.0)
+    for b in [p for p in arena.players.values() if p.is_bot]:
+        b.team = 1 - human.team            # 让所有电脑都是敌人
+        place(b, 0.0, 6.0)                 # 站在中间附近，一定能看到人
+    events = []
+    for _ in range(400):
+        clock.t += 0.05
+        arena.tick()
+        events += arena.take_events()
+    shots = [e for e in events if e["e"] == "shot"]
+    assert shots, "电脑应该会开枪"
+    # 电脑之间是敌对的，它们也会互相射击（不只是打玩家）
+    bot_ids = {p.id for p in arena.players.values() if p.is_bot}
+    assert any(e["by"] in bot_ids for e in shots)
+
+
+def test_bots_move_when_nobody_is_around(arena, clock):
+    arena.balance_bots()
+    bot = [p for p in arena.players.values() if p.is_bot][0]
+    start = (bot.x, bot.z)
+    for _ in range(200):
+        clock.t += 0.05
+        arena.tick()
+    assert (bot.x, bot.z) != start

@@ -1,4 +1,4 @@
-"""突击行动的游戏逻辑：移动、碰撞、射线、武器、金钱、狙击镜、开火、死亡和复活。
+"""突击行动的游戏逻辑：移动、碰撞、射线、武器、金钱、狙击镜、两队、电脑玩家、开火、死亡和复活。
 
 这里是纯逻辑，不依赖 WebSocket，方便写单元测试。
 服务器是唯一的裁判；static/game.js 里的 move() 与这里的 move() 保持一致，用于客户端预测。
@@ -15,6 +15,7 @@ from . import config as C
 
 Vec = Tuple[float, float, float]
 SLOTS = ("primary", "secondary")
+BOT_PREFIX = "电脑"
 
 
 def blocked(x: float, z: float, walls=C.WALLS) -> bool:
@@ -84,6 +85,11 @@ def _default_slots() -> Dict[str, Optional[str]]:
     return {"primary": None, "secondary": C.DEFAULT_WEAPON}
 
 
+def _angle_diff(a: float, b: float) -> float:
+    """两个角度之间的最短差（结果在 -π 到 π 之间）。"""
+    return (b - a + math.pi) % (2 * math.pi) - math.pi
+
+
 @dataclass
 class Player:
     id: int
@@ -105,6 +111,12 @@ class Player:
     slots: Dict[str, Optional[str]] = field(default_factory=_default_slots)   # 主武器 / 副武器
     active: str = "secondary"                                                  # 当前拿着哪个槽位
     scoped: bool = False                                                       # 是否开着狙击镜
+    team: int = 0                                                              # 0 红队，1 蓝队
+    is_bot: bool = False                                                       # 是不是电脑玩家
+    bot_target: Optional[int] = None         # 电脑正在追击的敌人 id
+    bot_seen_since: float = 0.0              # 什么时候第一次看到这个敌人
+    bot_wp: Optional[Tuple[float, float]] = None   # 电脑巡逻的目标点
+    bot_wp_until: float = 0.0                # 巡逻目标最晚到什么时候换
 
     def weapon(self) -> dict:
         return C.WEAPONS[self.slots[self.active] or C.DEFAULT_WEAPON]
@@ -118,15 +130,35 @@ class Arena:
         self.rng = rng or random.Random()
         self.players: Dict[int, Player] = {}
         self.events: List[dict] = []
+        self.team_kills = [0, 0]          # 两队的击杀数
         self._next_id = 1
+        self._bot_count = 0
+        self._last_tick: Optional[float] = None
 
     # ---- 进出房间
+
+    def _pick_team(self) -> int:
+        """分到人少的那一队；人数一样多时分到红队（0）。"""
+        counts = [0, 0]
+        for p in self.players.values():
+            counts[p.team] += 1
+        return 0 if counts[0] <= counts[1] else 1
 
     def add_player(self, name: str) -> Player:
         if len(self.players) >= C.MAX_PLAYERS:
             raise ValueError("房间已满")
         now = self.clock()
-        p = Player(id=self._next_id, name=name, last_input=now)
+        p = Player(id=self._next_id, name=name, last_input=now, team=self._pick_team())
+        self._next_id += 1
+        self.players[p.id] = p
+        self.spawn(p)
+        return p
+
+    def add_bot(self) -> Player:
+        self._bot_count += 1
+        now = self.clock()
+        p = Player(id=self._next_id, name=f"{BOT_PREFIX}{self._bot_count}", last_input=now,
+                   team=self._pick_team(), is_bot=True)
         self._next_id += 1
         self.players[p.id] = p
         self.spawn(p)
@@ -135,11 +167,31 @@ class Arena:
     def remove_player(self, pid: int) -> None:
         self.players.pop(pid, None)
 
+    def human_count(self) -> int:
+        return sum(1 for p in self.players.values() if not p.is_bot)
+
+    def balance_bots(self) -> None:
+        """让「人类玩家 + 电脑」至少有 MIN_ONLINE 人：不够就加电脑，多了就踢掉电脑（优先踢人多的那一队的）。"""
+        target = max(0, C.MIN_ONLINE - self.human_count())
+        bots = [p for p in self.players.values() if p.is_bot]
+        while len(bots) < target:
+            bots.append(self.add_bot())
+        while len(bots) > target:
+            counts = [0, 0]
+            for b in bots:
+                counts[b.team] += 1
+            team = 0 if counts[0] >= counts[1] else 1
+            victim = max((b for b in bots if b.team == team), key=lambda b: b.id)
+            bots.remove(victim)
+            self.remove_player(victim.id)
+
     # ---- 出生与复活
 
     def spawn(self, p: Player) -> None:
-        """挑一个离其他活人最远的出生点（同样远的话随机选），血量回满。"""
-        others = [q for q in self.players.values() if q is not p and q.alive]
+        """挑一个离其他活的敌人最远的出生点（同样远的话随机选），血量回满。"""
+        others = [q for q in self.players.values() if q is not p and q.alive and q.team != p.team]
+        if not others:
+            others = [q for q in self.players.values() if q is not p and q.alive]
         order = list(C.SPAWNS)
         self.rng.shuffle(order)
         best, best_score = order[0], -1.0
@@ -152,19 +204,26 @@ class Arena:
         p.alive = True
         p.yaw = 0.0
         p.pitch = 0.0
+        p.bot_target = None
+        p.bot_wp = None
 
     def tick(self) -> None:
-        """每个广播周期调用一次：到时间的死人复活。"""
+        """每个广播周期调用一次：复活到期的人，然后让电脑玩家思考和行动。"""
         now = self.clock()
+        dt = 0.0 if self._last_tick is None else min(max(now - self._last_tick, 0.0), C.MAX_DT)
+        self._last_tick = now
         for p in self.players.values():
             if not p.alive and now >= p.respawn_at:
                 self.spawn(p)
+        for p in list(self.players.values()):
+            if p.is_bot and p.alive:
+                self._bot_think(p, now, dt)
 
     # ---- 玩家操作
 
     def input(self, pid: int, seq: int, fwd: float, side: float, yaw: float, pitch: float, dt: float) -> None:
         p = self.players.get(pid)
-        if p is None or seq <= p.ack:
+        if p is None or seq <= p.ack or p.is_bot:
             return  # 玩家不存在，或者是重复 / 乱序的旧输入
         now = self.clock()
         # 移动时间预算：按真实经过的时间攒，发消息再快也不能超出真实时间。
@@ -198,7 +257,7 @@ class Arena:
         """买一把武器，自动装备到它所在的槽位（替换掉那个槽位原来的武器）。
         只能在活着的时候买；手枪是免费的默认武器，不能买。"""
         p = self.players.get(pid)
-        if p is None or not p.alive:
+        if p is None or not p.alive or p.is_bot:
             return False
         w = C.WEAPONS.get(weapon_id)
         if w is None or w["price"] <= 0:
@@ -212,7 +271,7 @@ class Arena:
         p.scoped = False
         return True
 
-    def fire(self, pid: int) -> None:
+    def fire(self, pid: int, extra_spread: float = 0.0) -> None:
         p = self.players.get(pid)
         if p is None or not p.alive:
             return
@@ -222,8 +281,8 @@ class Arena:
             return
         p.last_fire = now
 
-        # 散布：每次开火在朝向上随机偏一点（开镜时只有十分之一）
-        spread = w["spread"] * (0.1 if p.scoped else 1.0)
+        # 散布：每次开火在朝向上随机偏一点（开镜时只有十分之一）；电脑玩家还会有额外的偏差
+        spread = w["spread"] * (0.1 if p.scoped else 1.0) + extra_spread
         yaw = p.yaw + self.rng.uniform(-spread, spread)
         pitch = p.pitch + self.rng.uniform(-spread, spread)
         origin: Vec = (p.x, C.EYE_HEIGHT, p.z)
@@ -238,11 +297,11 @@ class Arena:
         if d[1] < 0:
             reach = min(reach, -origin[1] / d[1])
 
-        # 再看子弹能不能打到人：离枪口最近的那个活人
+        # 再看子弹能不能打到人：离枪口最近的那个敌人（队友不会挡住子弹，也不会被打中）
         target: Optional[Player] = None
         hit_t = reach
         for q in self.players.values():
-            if q is p or not q.alive:
+            if q is p or not q.alive or q.team == p.team:
                 continue
             r = C.PLAYER_RADIUS
             t = ray_box(origin, d, (q.x - r, 0.0, q.z - r), (q.x + r, C.PLAYER_HEIGHT, q.z + r))
@@ -269,7 +328,84 @@ class Arena:
         victim.scoped = False
         killer.kills += 1
         killer.money = min(C.MAX_MONEY, killer.money + C.KILL_REWARD)
+        self.team_kills[killer.team] += 1
         self.events.append({"e": "kill", "by": killer.id, "to": victim.id, "head": head})
+
+    # ---- 电脑玩家的简单 AI
+
+    def _clear_line(self, a: Vec, b: Vec) -> bool:
+        """从 a 到 b 的直线上有没有墙或箱子挡着。"""
+        dx, dy, dz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+        length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if length < 1e-9:
+            return True
+        d = (dx / length, dy / length, dz / length)
+        for x0, y0, z0, x1, y1, z1 in C.WALLS:
+            t = ray_box(a, d, (x0, y0, z0), (x1, y1, z1))
+            if t is not None and t < length:
+                return False
+        return True
+
+    def _turn(self, cur: float, want: float, dt: float) -> float:
+        """慢慢转向目标角度（不会一下子转过去，人看起来也更自然）。"""
+        diff = _angle_diff(cur, want)
+        step = min(max(diff, -C.BOT_TURN * dt), C.BOT_TURN * dt)
+        return cur + step
+
+    def _random_point(self) -> Tuple[float, float]:
+        bound = C.ARENA_HALF - 3.0
+        for _ in range(30):
+            x = self.rng.uniform(-bound, bound)
+            z = self.rng.uniform(-bound, bound)
+            if not blocked(x, z):
+                return x, z
+        return 0.0, 0.0
+
+    def _bot_think(self, p: Player, now: float, dt: float) -> None:
+        """电脑玩家每个周期做一次决定：看得到敌人就追击并射击，看不到就四处巡逻。"""
+        eye: Vec = (p.x, C.EYE_HEIGHT, p.z)
+        target: Optional[Player] = None
+        best = C.BOT_SIGHT
+        for q in self.players.values():
+            if q is p or not q.alive or q.team == p.team:
+                continue
+            dist = math.hypot(q.x - p.x, q.z - p.z)
+            if dist >= best:
+                continue
+            if self._clear_line(eye, (q.x, 1.0, q.z)):    # 瞄准身体中间（约 1 米高）
+                target, best = q, dist
+
+        if target is not None:
+            if p.bot_target != target.id:
+                p.bot_target = target.id
+                p.bot_seen_since = now
+            dx, dz = target.x - p.x, target.z - p.z
+            want_yaw = math.atan2(-dx, -dz)                       # 和 game.py 的朝向约定一致
+            want_pitch = math.atan2(1.0 - C.EYE_HEIGHT, math.hypot(dx, dz))
+            p.yaw = self._turn(p.yaw, want_yaw, dt)
+            p.pitch = min(max(self._turn(p.pitch, want_pitch, dt), -C.MAX_PITCH), C.MAX_PITCH)
+            # 远了就靠近，近了就后退，同时左右走动（不站着当靶子）
+            fwd = 0.7 if best > 14 else (-0.4 if best < 6 else 0.0)
+            side = math.sin(now * 1.7 + p.id) * 0.8
+            p.x, p.z = move(p.x, p.z, fwd, side, p.yaw, dt)
+            aimed = abs(_angle_diff(p.yaw, want_yaw)) < 0.2 and abs(_angle_diff(p.pitch, want_pitch)) < 0.2
+            if aimed and now - p.bot_seen_since >= C.BOT_REACTION and self.rng.random() < C.BOT_FIRE_CHANCE:
+                self.fire(p.id, extra_spread=C.BOT_SPREAD)
+            return
+
+        # 看不到敌人：巡逻。走到目标点、或者目标点到期、或者被挡住了，就换一个目标点。
+        p.bot_target = None
+        if p.bot_wp is None or now >= p.bot_wp_until or math.hypot(p.bot_wp[0] - p.x, p.bot_wp[1] - p.z) < 1.0:
+            p.bot_wp = self._random_point()
+            p.bot_wp_until = now + 8.0
+        wx, wz = p.bot_wp
+        want_yaw = math.atan2(-(wx - p.x), -(wz - p.z))
+        p.yaw = self._turn(p.yaw, want_yaw, dt)
+        p.pitch = self._turn(p.pitch, 0.0, dt)
+        before = (p.x, p.z)
+        p.x, p.z = move(p.x, p.z, 1.0, 0.0, p.yaw, dt)
+        if math.hypot(p.x - before[0], p.z - before[1]) < 0.2 * C.MOVE_SPEED * dt:
+            p.bot_wp = None      # 撞墙了，下一次换个目标点
 
     # ---- 给客户端的数据
 
@@ -279,7 +415,7 @@ class Arena:
 
     def roster(self) -> List[dict]:
         return [
-            {"id": p.id, "name": p.name, "x": round(p.x, 3), "z": round(p.z, 3),
+            {"id": p.id, "name": p.name, "team": p.team, "x": round(p.x, 3), "z": round(p.z, 3),
              "yaw": round(p.yaw, 4), "pitch": round(p.pitch, 4), "hp": p.hp, "alive": p.alive,
              "kills": p.kills, "deaths": p.deaths}
             for p in self.players.values()
@@ -293,7 +429,7 @@ class Arena:
         return {"x": round(p.x, 3), "z": round(p.z, 3), "hp": p.hp, "alive": p.alive, "ack": p.ack,
                 "respawn_in": round(max(p.respawn_at - now, 0.0), 2) if not p.alive else 0.0,
                 "kills": p.kills, "deaths": p.deaths, "money": p.money,
-                "slots": dict(p.slots), "active": p.active, "scoped": p.scoped}
+                "slots": dict(p.slots), "active": p.active, "scoped": p.scoped, "team": p.team}
 
 
 def _r(v: Vec) -> List[float]:
