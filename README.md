@@ -34,6 +34,16 @@ cp .env.example .env        # 按需填写，全部留空也能运行
 `.env` 里没有 `DATABASE_URL` 时使用本地 SQLite 文件 `dev.db`；填上 Neon 的连接字符串就用 Neon。
 没配置 SMTP 时，邮箱验证链接会打印在服务器日志里。
 
+## 开发
+
+开发流程和规范见 [AGENTS.md](AGENTS.md)（AI 编程助手和人都按它来）。
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q          # 运行测试
+scripts/wait_for_deploy.sh             # push 到 main 后等待 Render 部署上线
+```
+
 ## 操作
 
 - 拖动地图平移，滚轮缩放，WASD / 方向键移动视角，H 回到主城
