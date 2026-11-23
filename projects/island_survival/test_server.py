@@ -71,3 +71,13 @@ def test_garbage_numbers_do_not_crash_server(client):
         assert err["text"]
         ws.send_json({"type": "move", "dx": 1e9, "dz": 0})
         receive_until(ws, "error")
+
+
+def test_world_is_saved_and_loaded(client):
+    import asyncio
+    from projects.island_survival import server
+    asyncio.run(server.save_now())
+    loaded = asyncio.run(server.load_world())
+    assert loaded.seed == server.game.seed
+    assert loaded.tick_no > 0                            # 世界一直在跑，存的是跑了一段时间之后的状态
+    assert len(loaded.res) == len(server.game.res)

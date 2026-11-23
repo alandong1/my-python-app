@@ -307,3 +307,54 @@ def test_view_only_sends_nearby_things(g):
     p.events.append("测试消息")
     assert g.view(p, False)["me"]["events"] == ["测试消息"]
     assert g.view(p, False)["me"]["events"] == []
+
+
+# ------------------------------------------------------------ 存档
+
+def test_world_survives_save_and_reload(g):
+    import json
+    x, z = open_spot(g)
+    p = g.join(7, "甲", "doctor")
+    place(g, p, x + 0.5, z + 0.5)
+    p.inv = {"herb": 2}
+    p.hunger = 50.0
+    g.fires.append(Fire(id=g._new_id(), x=x + 0.5, z=z + 0.5, until=g.time + 200))
+    for _ in range(20):
+        g.tick()
+    data = json.loads(json.dumps(g.to_dict()))           # 真的走一遍 JSON，和数据库里一样
+    g2 = Game.from_dict(data)
+    assert g2.time == pytest.approx(g.time) and g2.tick_no == g.tick_no
+    assert [(r.kind, r.x, r.z, r.hp, r.present) for r in g2.res] == \
+        [(r.kind, r.x, r.z, r.hp, r.present) for r in g.res]
+    assert g2.tree_at == g.tree_at
+    assert len(g2.animals) == len(g.animals) and len(g2.fires) == 1
+    q = g2.join(7, "甲", "doctor")                        # 同一个账户、同一个角色：接着玩
+    assert q.role == "doctor" and q.inv == {"herb": 2}
+    assert q.hunger == pytest.approx(p.hunger, abs=0.5)
+    assert (q.x, q.z) == pytest.approx((p.x, p.z))
+
+
+def test_rejoin_with_another_role_starts_fresh(g):
+    p = g.join(8, "乙", "chef")
+    p.inv = {"wood": 9}
+    g.leave(p.id)
+    q = g.join(8, "乙", "priest")                        # 换了角色：不恢复旧角色
+    assert q.role == "priest" and q.inv == {}
+
+
+def test_offline_character_is_kept_and_frozen(g):
+    p = g.join(9, "丙", "chef")
+    p.hunger = 60.0
+    g.leave(p.id)
+    frozen = dict(g.saved[9])
+    for _ in range(100):
+        g.tick()                                         # 世界照常运行
+    assert g.time > 9
+    assert g.saved[9] == frozen                          # 下线的角色不会继续饿
+    assert g.join(9, "丙", "chef").hunger == pytest.approx(60.0)
+
+
+def test_wrong_save_version_is_rejected(g):
+    d = g.to_dict()
+    with pytest.raises(ValueError):
+        Game.from_dict({**d, "version": 999})
