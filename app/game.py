@@ -49,9 +49,9 @@ class Army:
 
 
 class Player:
-    def __init__(self, pid: str, name: str, color: str):
+    def __init__(self, pid: str, account_id: int, name: str, color: str):
         self.id = pid
-        self.token = uuid.uuid4().hex
+        self.account_id = account_id
         self.name = name
         self.color = color
         self.alive = False
@@ -148,7 +148,7 @@ class Game:
         self.rng = random.Random(seed)
         self.tiles = generate_map(self.w, self.h, seed)
         self.players: Dict[str, Player] = {}
-        self.tokens: Dict[str, str] = {}
+        self.by_account: Dict[int, str] = {}  # 账户 id -> 玩家 id
         self.armies: Dict[int, Army] = {}
         self._next_army = 1
         self.tick_no = 0
@@ -179,17 +179,20 @@ class Game:
         return a
 
     # ---------- 玩家加入 / 出生
-    def join(self, name: str, token: Optional[str]) -> Player:
-        if token and token in self.tokens:
-            return self.players[self.tokens[token]]
+    def join(self, account_id: int, name: str) -> Player:
+        """已登录的账户进入游戏：已有王国就继续，没有就新建一个。"""
+        if account_id in self.by_account:
+            p = self.players[self.by_account[account_id]]
+            p.name = name[:12] or p.name   # 账户改名后同步
+            return p
         name = (name or "").strip()[:12] or "无名领主"
         pid = uuid.uuid4().hex[:8]
         used = {p.color for p in self.players.values()}
         color = next((c for c in C.PLAYER_COLORS if c not in used),
                      "#%06x" % self.rng.randint(0, 0xFFFFFF))
-        p = Player(pid, name, color)
+        p = Player(pid, account_id, name, color)
         self.players[pid] = p
-        self.tokens[p.token] = pid
+        self.by_account[account_id] = pid
         self.spawn(p)
         return p
 

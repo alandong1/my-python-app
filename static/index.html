@@ -7,13 +7,42 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div id="login">
+  <div id="login" hidden>
     <div class="login-box">
       <h1>⚔️ 领主战争</h1>
       <p>建立你的王国，拓展领土，征服野怪和其他领主。</p>
-      <input id="name" maxlength="12" placeholder="你的领主名" autocomplete="off">
-      <button id="joinBtn">进入世界</button>
-      <button id="newBtn" class="link">换个新身份</button>
+      <button id="guestBtn" class="big primary">🎮 游客试玩</button>
+      <small class="muted">游客身份保存在当前浏览器，换设备或清除数据后无法找回</small>
+      <div class="divider"><span>或使用账号</span></div>
+      <div class="tabs">
+        <button data-tab="loginForm" class="active">登录</button>
+        <button data-tab="registerForm">注册</button>
+      </div>
+      <form id="loginForm">
+        <input name="username" placeholder="用户名或邮箱" autocomplete="username" required>
+        <input name="password" type="password" placeholder="密码" autocomplete="current-password" required>
+        <button class="big">登录</button>
+      </form>
+      <form id="registerForm" hidden>
+        <input name="username" placeholder="用户名（3–20 位，可用中文）" autocomplete="username" required>
+        <input name="password" type="password" placeholder="密码（至少 8 位）" autocomplete="new-password" required>
+        <input name="email" type="email" placeholder="邮箱（可选，用于找回账号）" autocomplete="email">
+        <button class="big">注册并进入</button>
+      </form>
+      <div id="oauthBox" hidden>
+        <div class="divider"><span>第三方登录</span></div>
+        <div id="oauthBtns"></div>
+      </div>
+      <div id="loginErr" class="err"></div>
+    </div>
+  </div>
+
+  <div id="accountModal" class="modal" hidden>
+    <div class="login-box">
+      <h3>👤 我的账号</h3>
+      <div id="accountBody"></div>
+      <button id="logoutBtn">退出登录</button>
+      <button id="closeAccount" class="link">关闭</button>
     </div>
   </div>
 
@@ -24,6 +53,7 @@
       <span class="res">🗺️ <b id="tileCount">0</b></span>
       <span class="spacer"></span>
       <button id="homeBtn" title="回到主城 (H)">🏰 主城</button>
+      <button id="accountBtn">👤 <span id="accountName"></span></button>
       <span id="conn" class="dot"></span>
     </header>
     <main>

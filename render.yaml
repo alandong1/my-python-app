@@ -5,8 +5,9 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    # Render 通过 $PORT 告诉程序用哪个端口；0.0.0.0 让外部请求能连进来
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Render 通过 $PORT 告诉程序用哪个端口；0.0.0.0 让外部请求能连进来；
+    # forwarded-allow-ips 让程序信任 Render 代理转发的真实客户端 IP（限流要用）
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
     healthCheckPath: /health
     autoDeploy: true
     # 游戏状态在内存里，只能有一个实例
@@ -14,3 +15,10 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: COOKIE_SECURE
+        value: "1"
+      # 以下为密钥或与网址相关的值：sync: false 表示不写在代码里，在 Render 网页上填写
+      - key: DATABASE_URL
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false

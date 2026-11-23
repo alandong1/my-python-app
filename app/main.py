@@ -1,4 +1,4 @@
-"""FastAPI 服务器：提供网页 + WebSocket 实时通信 + 游戏主循环。
+"""FastAPI 服务器：提供网页 + 账户接口 + WebSocket 实时通信 + 游戏主循环。
 
 运行：uvicorn app.main:app --reload
 """
@@ -10,14 +10,20 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, Optional
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from . import config as C
+from .auth import SESSION_COOKIE, lookup_session_user
+from .auth import router as auth_router
+from .db import describe_db, init_db
 from .game import Game, GameError, Player
 
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("game")
 STATIC = Path(__file__).resolve().parent.parent / "static"
 
@@ -45,6 +51,8 @@ async def game_loop():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    log.info("数据库：%s", describe_db())
+    await run_in_threadpool(init_db)
     task = asyncio.create_task(game_loop())
     yield
     task.cancel()
@@ -52,6 +60,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="领主战争", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.include_router(auth_router)
 
 
 @app.get("/")
@@ -78,22 +87,37 @@ ACTIONS = {
 }
 
 
+def _same_origin(ws: WebSocket) -> bool:
+    """拒绝其他网站发起的 WebSocket 连接（防止别的网站借用玩家的登录状态）。"""
+    origin = ws.headers.get("origin")
+    if not origin:
+        return True  # 非浏览器客户端
+    return urlsplit(origin).netloc == ws.headers.get("host")
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    if not _same_origin(ws):
+        await ws.close(code=4403)
+        return
     await ws.accept()
     player: Optional[Player] = None
     try:
+        account = await run_in_threadpool(lookup_session_user, ws.cookies.get(SESSION_COOKIE))
+        if not account:
+            await ws.send_json({"type": "auth", "text": "请先登录"})
+            await ws.close(code=4401)
+            return
         hello = await ws.receive_json()
         if hello.get("type") != "join":
             await ws.close()
             return
-        player = game.join(str(hello.get("name", "")), hello.get("token"))
+        player = game.join(*account)
         player.online += 1
         game._compute_vision(player)
         explored = [[x, y, game.tile(x, y).terrain] for x, y in player.explored]
-        await ws.send_json({"type": "welcome", "id": player.id, "token": player.token,
-                            "name": player.name, "info": game.static_info(),
-                            "explored": explored})
+        await ws.send_json({"type": "welcome", "id": player.id, "name": player.name,
+                            "info": game.static_info(), "explored": explored})
         clients[ws] = player
         while True:
             msg = await ws.receive_json()

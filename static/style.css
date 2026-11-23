@@ -30,7 +30,26 @@ small, .muted { color: var(--muted); }
 .login-box p { margin: 0; color: var(--muted); }
 .login-box input { padding: 10px; font-size: 16px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--bg); color: var(--text); }
-#joinBtn { padding: 10px; font-size: 16px; background: var(--accent); color: #1a1a1a; font-weight: 600; }
+.login-box form { display: flex; flex-direction: column; gap: 10px; }
+.login-box form.row { flex-direction: row; flex-wrap: nowrap; }
+.login-box small { font-size: 12px; }
+button.big { padding: 10px; font-size: 16px; }
+.divider { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.tabs { display: flex; gap: 6px; }
+.tabs button { flex: 1; }
+.tabs button.active { border-color: var(--accent); color: var(--accent); }
+#oauthBtns { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+#oauthBtns a { display: block; padding: 9px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel2); color: var(--text); text-decoration: none; }
+#oauthBtns a:hover { border-color: var(--accent); }
+.err { color: var(--bad); min-height: 1.2em; font-size: 13px; }
+.modal { position: fixed; inset: 0; display: grid; place-items: center; background: #000a; z-index: 10; }
+.modal .login-box { text-align: left; }
+.modal .row input { flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); min-width: 0; }
+.badge { font-size: 12px; padding: 1px 6px; border-radius: 10px; background: var(--panel2); color: var(--muted); }
+.badge.ok { color: var(--good); }
 
 #game { display: flex; flex-direction: column; height: 100vh; }
 #topbar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: var(--panel);
@@ -66,6 +85,7 @@ main { flex: 1; display: flex; min-height: 0; }
 #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--bad);
   color: #fff; padding: 8px 18px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 #toast.show { opacity: 1; }
+#toast.ok { background: var(--good); }
 
 @media (max-width: 760px) {
   main { flex-direction: column; }

@@ -22,17 +22,18 @@ const $ = (id) => document.getElementById(id);
 const key = (x, y) => x + "," + y;
 
 // ============================================================ 网络
-function connect(name) {
+// 登录状态保存在服务器设置的 HttpOnly cookie 里，WebSocket 连接时浏览器会自动带上
+function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   S.ws = ws;
   ws.onopen = () => {
     $("conn").classList.add("on");
-    ws.send(JSON.stringify({ type: "join", name, token: localStorage.getItem("token") }));
+    ws.send(JSON.stringify({ type: "join" }));
   };
   ws.onclose = () => {
     $("conn").classList.remove("on");
-    setTimeout(() => connect(name), 2000);
+    if (S.ws === ws && S.account) setTimeout(() => S.ws === ws && connect(), 2000);
   };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
 }
@@ -44,8 +45,6 @@ function send(type, data = {}) {
 function handle(m) {
   if (m.type === "welcome") {
     S.info = m.info; S.myId = m.id;
-    localStorage.setItem("token", m.token);
-    localStorage.setItem("name", m.name);
     for (const [x, y, t] of m.explored) {
       const k = key(x, y);
       if (!S.known.has(k)) S.known.set(k, { t, owner: null, b: null, lv: 0, npc: null });
@@ -56,6 +55,10 @@ function handle(m) {
     onState(m);
   } else if (m.type === "error") {
     toast(m.text);
+  } else if (m.type === "auth") {
+    // 登录已过期
+    S.account = null; S.ws = null;
+    showLogin(m.text);
   }
 }
 
@@ -496,9 +499,10 @@ function addLog(e) {
 }
 
 let toastTimer;
-function toast(text) {
+function toast(text, ok = false) {
   const t = $("toast");
   t.textContent = text; t.classList.add("show");
+  t.classList.toggle("ok", ok);
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
 }
@@ -522,12 +526,138 @@ $("side").addEventListener("click", (e) => {
 // ============================================================ 启动
 $("homeBtn").onclick = () => S.me && S.me.hq && centerOn(...S.me.hq);
 $("respawnBtn").onclick = () => send("respawn");
-$("name").value = localStorage.getItem("name") || "";
-function join() {
-  const name = $("name").value.trim() || "无名领主";
-  $("joinBtn").disabled = true;
-  connect(name);
+
+// ============================================================ 账号
+async function api(path, body) {
+  const r = await fetch("/api/auth" + path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = data.detail;
+    throw new Error(typeof d === "string" ? d : "请求失败，请检查输入");
+  }
+  return data;
 }
-$("joinBtn").onclick = join;
-$("name").addEventListener("keydown", (e) => e.key === "Enter" && join());
-$("newBtn").onclick = () => { localStorage.removeItem("token"); toast("已清除旧身份，输入新名字进入"); };
+
+// 游客凭证：第一次生成后一直保存在这个浏览器的 localStorage 里
+function guestKey() {
+  let k = null;
+  try { k = localStorage.getItem("guestKey"); } catch (e) {}
+  if (!k) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    k = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    try { localStorage.setItem("guestKey", k); } catch (e) {}
+  }
+  return k;
+}
+
+function showLogin(err = "") {
+  $("game").hidden = true; $("accountModal").hidden = true; $("login").hidden = false;
+  $("loginErr").textContent = err;
+}
+
+function enterGame(account) {
+  S.account = account;
+  $("accountName").textContent = account.displayName;
+  $("login").hidden = true; $("game").hidden = false;
+  resize();
+  connect();
+}
+
+async function withLoginErrors(fn) {
+  $("loginErr").textContent = "";
+  try { enterGame(await fn()); } catch (e) { $("loginErr").textContent = e.message; }
+}
+
+$("guestBtn").onclick = () => withLoginErrors(() => api("/guest", { guest_key: guestKey() }));
+$("loginForm").onsubmit = (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  withLoginErrors(() => api("/login", { username: f.get("username"), password: f.get("password") }));
+};
+$("registerForm").onsubmit = (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  withLoginErrors(() => api("/register", {
+    username: f.get("username"), password: f.get("password"), email: f.get("email") || null,
+  }));
+};
+document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
+  $("loginForm").hidden = b.dataset.tab !== "loginForm";
+  $("registerForm").hidden = b.dataset.tab !== "registerForm";
+  $("loginErr").textContent = "";
+});
+
+const PROVIDER_ICON = { google: "🔵", apple: "🍎", wechat: "💬" };
+let PROVIDERS = [];
+
+async function renderAccount() {
+  const a = S.account = await api("/me");
+  $("accountName").textContent = a.displayName;
+  let h = `<div class="row"><b>${esc(a.displayName)}</b>
+    <span class="badge">${a.isGuest ? "游客" : a.username ? "正式账号" : "第三方账号"}</span></div>`;
+  if (a.username) h += `<div class="muted">用户名：${esc(a.username)}</div>`;
+  if (a.isGuest) {
+    h += `<p class="muted">游客身份只保存在这个浏览器里。绑定一个第三方账号后，就可以在其他设备上登录。</p>`;
+  } else {
+    h += `<h3 style="margin-top:12px">📧 邮箱</h3>`;
+    if (a.email) h += `<div class="row">${esc(a.email)} <span class="badge ok">已验证</span></div>`;
+    if (a.pendingEmail) h += `<div class="row muted">${esc(a.pendingEmail)} <span class="badge">待验证，请查收邮件</span></div>`;
+    h += `<form id="emailForm" class="row"><input name="email" type="email" placeholder="${a.email ? "更换邮箱" : "绑定邮箱"}" required>
+      <button>发送验证</button></form>`;
+  }
+  if (PROVIDERS.length) {
+    h += `<h3 style="margin-top:12px">🔗 第三方账号</h3>`;
+    for (const p of PROVIDERS) {
+      h += a.linked.includes(p.id)
+        ? `<div class="row">${PROVIDER_ICON[p.id] || ""} ${p.label} <span class="badge ok">已绑定</span></div>`
+        : `<div class="row">${PROVIDER_ICON[p.id] || ""} ${p.label} <span class="grow"></span><a href="/api/auth/oauth/${p.id}/start?link=1"><button type="button">绑定</button></a></div>`;
+    }
+  }
+  $("accountBody").innerHTML = h;
+  const form = $("emailForm");
+  if (form) form.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api("/email", { email: new FormData(form).get("email") });
+      toast("验证邮件已发送，请查收", true);
+      renderAccount();
+    } catch (err) { toast(err.message); }
+  };
+}
+
+$("accountBtn").onclick = async () => {
+  try { await renderAccount(); $("accountModal").hidden = false; } catch (e) { toast(e.message); }
+};
+$("closeAccount").onclick = () => { $("accountModal").hidden = true; };
+$("logoutBtn").onclick = async () => {
+  await api("/logout", {}).catch(() => {});
+  S.account = null;
+  const ws = S.ws; S.ws = null;
+  if (ws) ws.close();
+  S.known.clear(); S.me = null; S.centered = false; S.sel = null;
+  showLogin();
+};
+
+async function boot() {
+  // 邮箱验证、第三方登录跳转回来时，地址栏会带上提示信息
+  const q = new URLSearchParams(location.search);
+  const msg = q.get("error") || q.get("info");
+  if (q.has("error") || q.has("info")) history.replaceState(null, "", "/");
+  try {
+    PROVIDERS = (await api("/providers")).providers;
+  } catch (e) { PROVIDERS = []; }
+  $("oauthBox").hidden = !PROVIDERS.length;
+  $("oauthBtns").innerHTML = PROVIDERS.map((p) =>
+    `<a href="/api/auth/oauth/${p.id}/start">${PROVIDER_ICON[p.id] || ""} 使用 ${p.label} 登录</a>`).join("");
+  try {
+    enterGame(await api("/me"));
+    if (msg) toast(msg, q.has("info"));
+  } catch (e) {
+    showLogin(q.get("error") || "");
+    if (q.get("info")) toast(q.get("info"), true);
+  }
+}
+boot();
