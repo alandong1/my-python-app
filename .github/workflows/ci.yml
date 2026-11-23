@@ -9,7 +9,7 @@ on:
   pull_request:
   push:
     branches: [main]
-  # sync-prs.yml 把 main 同步进 PR 后用它触发（GITHUB_TOKEN 推送的提交不会触发 pull_request）
+  # 手动重跑测试用：在 Actions 页面选分支运行，base 填和哪个提交比较（留空则全部测试）
   workflow_dispatch:
     inputs:
       base:

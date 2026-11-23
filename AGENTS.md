@@ -33,7 +33,7 @@
 | `docs/requirements.md` | **平台**的需求与设计决定 |
 | `scripts/changes.py` | 按改动的文件选测试（`run`）、检查 PR 改动范围（`scope`） |
 | `scripts/wait_for_deploy.sh` | 等待 PR 合并进 `main`、Render 部署上线 |
-| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试和改动范围检查，`pr-gate.yml` PR 审核规则，`ci-failure-limit.yml` CI 失败次数上限，`sync-prs.yml` 自动把 main 同步进落后的 PR |
+| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试和改动范围检查，`pr-gate.yml` PR 审核规则，`ci-failure-limit.yml` CI 失败次数上限 |
 | `deploy.conf` | 测试环境地址（非机密，正式来源；`README.md` 里有一份抄录） |
 
 ## 常用命令
@@ -70,7 +70,7 @@ scripts/wait_for_deploy.sh                                               # 开 P
    - 合并方式用 **merge commit**，不要 squash 或 rebase，否则 `wait_for_deploy.sh` 判断不出提交是否已合并。
 4. **等待合并并部署上线**：运行 `scripts/wait_for_deploy.sh`。它先等当前提交合并进 `main`，再轮询 `/version`，直到线上版本等于合并后的 `main`。
    - CI 测试失败时 PR 不会合并：修好后在同一个分支上再 push，PR 会自动更新。
-   - PR 落后于 `main`（别的 PR 先合并了）时，`.github/workflows/sync-prs.yml` 会自动把 `main` 合并进来、重新跑测试，不用管。**有冲突时它做不了**，会在 PR 上留言：这时在自己的分支上 `git fetch origin main && git merge origin/main`，解决冲突、跑测试后再 push。
+   - PR 落后于 `main`（别的 PR 先合并了）**不影响合并**，不需要同步。只有和 `main` **有冲突**时 GitHub 才会拦住：这时在自己的分支上 `git fetch origin main && git merge origin/main`，解决冲突、跑测试后再 push。开 PR 前先合并一次最新的 `main`，可以减少冲突。
    - **自动修复的次数上限（防止死循环烧 token）**：
      - 同一个 PR，AI 最多自己修 **3 轮**（CI 失败一次、或审核打回一次，各算一轮）。第 3 轮还不行，就**停止 push**，在 PR 上留言写清楚卡在哪、试过什么，然后通知负责人，等人工介入。
      - `.github/workflows/ci-failure-limit.yml` 会强制执行：同一个 PR 的 CI 失败满 3 次，自动打上 **`needs-human`** 标签、关闭自动合并、留言通知负责人。
@@ -175,7 +175,7 @@ scripts/wait_for_deploy.sh                                               # 开 P
 | 新增 / 删除项目 | 只有 `projects/<slug>/` 目录本身（自动发现，不用登记） | — |
 | 项目名称 / 图标 / 分类 / 状态 | `projects/<slug>/__init__.py` 的 `PROJECT` | — |
 | 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要；`docs/requirements.md`「环境与部署」 | — |
-| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`.github/workflows/ci-failure-limit.yml`、`.github/workflows/sync-prs.yml`（它重复了 `pr-gate.yml` 的自动 approve 条件，两处要一致）、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」（现在是 `scope`、`test (3.9)`、`test (3.12)`）也要跟着改 |
+| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`.github/workflows/ci-failure-limit.yml`、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」（现在是 `scope`、`test (3.9)`、`test (3.12)`）也要跟着改 |
 | 编码规范 | `AGENTS.md`「规范」；重要的同步到 `.github/copilot-instructions.md` | — |
 | 测试环境网址 | `deploy.conf`、`README.md`「环境与网址」 | Render 环境变量 `PUBLIC_BASE_URL`；已启用的 OAuth 在 Google/Apple/微信后台的回调地址 |
 | 换部署平台 / 服务器 | `deploy.conf`、`render.yaml`、`app/settings.py`（`IS_RENDER`、`GIT_COMMIT` 的来源）、`app/main.py` 里的 Render 判断、`AGENTS.md`「环境」、`README.md` | 新平台的环境变量；OAuth 回调地址 |

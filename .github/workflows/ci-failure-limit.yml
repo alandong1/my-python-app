@@ -40,7 +40,7 @@ jobs:
       - name: Count CI failures on this PR
         run: |
           set -euo pipefail
-          # 找到这个分支对应的 PR（sync-prs.yml 触发的 CI 不带 PR 信息，所以按分支找）
+          # 找到这个分支对应的 PR（手动触发的 CI 不带 PR 信息，所以按分支找）
           PR=$(gh pr list --head "$BRANCH" --state open --json number,isCrossRepository \
             -q '[.[] | select(.isCrossRepository | not)][0].number // empty')
           if [ -z "$PR" ]; then echo "分支 $BRANCH 没有打开的 PR，不计数"; exit 0; fi
