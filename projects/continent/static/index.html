@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>大陆争霸 · Dev Lab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌍</text></svg>">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <a href="/" class="home" title="返回 Dev Lab">🏠</a>
+    <span class="res" title="金币">💰 <b id="gold">-</b> <small id="income"></small></span>
+    <span class="res" title="游戏时间">⏱ <b id="time">-</b></span>
+    <span class="spacer"></span>
+    <button id="zoomOut" title="缩小">－</button>
+    <button id="zoomIn" title="放大">＋</button>
+    <span id="conn" class="dot" title="连接状态"></span>
+  </header>
+
+  <main>
+    <div id="mapWrap">
+      <canvas id="map" aria-label="大地图"></canvas>
+    </div>
+
+    <aside id="side">
+      <div id="banner" hidden>
+        <span id="bannerText"></span>
+        <button id="cancelMode" class="small">取消</button>
+      </div>
+
+      <section>
+        <h3>🎯 选中的单位</h3>
+        <div id="selection"><p class="muted">框选或点击自己的单位。选中后，点空地是移动，点敌人是攻击。</p></div>
+      </section>
+
+      <section>
+        <h3>🗺️ 地块</h3>
+        <div id="tileInfo"><p class="muted">点击地图查看。</p></div>
+      </section>
+
+      <section>
+        <h3>🔨 建造 <small class="muted">（在自己基地附近点空地）</small></h3>
+        <div id="buildList"></div>
+      </section>
+
+      <section>
+        <h3>🏭 生产</h3>
+        <div id="prodList"><p class="muted">你还没有可以生产单位的建筑。</p></div>
+      </section>
+
+      <section>
+        <h3>🔬 研究升级</h3>
+        <div id="researchList"></div>
+      </section>
+
+      <section>
+        <h3>🏰 基地</h3>
+        <div id="baseInfo"></div>
+      </section>
+
+      <section>
+        <h3>👥 玩家</h3>
+        <div id="playerList"></div>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toast" role="status" hidden></div>
+  <script src="static/game.js"></script>
+</body>
+</html>
