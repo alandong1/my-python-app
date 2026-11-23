@@ -12,12 +12,18 @@
 name: Sync PRs with main
 
 on:
+  # 负责人手动合并 PR 时会触发
   push:
     branches: [main]
+  # 自动合并的 PR 是 github-actions 机器人合并的，它的推送不会触发其他 workflow，
+  # 所以靠定时检查兜底（GitHub 的定时任务可能晚几分钟）
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
 
 concurrency:
   group: sync-prs
-  cancel-in-progress: true
+  cancel-in-progress: false   # 排队执行，不要中途打断正在同步的任务
 
 permissions:
   contents: write        # 把 main 合并进 PR 分支
@@ -31,11 +37,11 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
       OWNER: ${{ github.repository_owner }}
-      MAIN_SHA: ${{ github.sha }}
     steps:
       - name: Update open PRs
         run: |
           set -uo pipefail
+          MAIN_SHA=$(gh api "repos/$GH_REPO/commits/main" -q .sha)
           prs=$(gh pr list --base main --state open --limit 100 \
             --json number,headRefName,headRefOid,isDraft,isCrossRepository,author,labels \
             -q '.[] | select((.isDraft | not) and (.isCrossRepository | not)
