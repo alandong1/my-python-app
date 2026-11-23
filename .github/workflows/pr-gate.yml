@@ -9,11 +9,14 @@
 #     所以别人没法在 PR 里改掉这个规则给自己放行。
 #   - 这个 workflow 不 checkout、不运行 PR 里的任何代码，只调用 GitHub API。
 #   - PR 作者由 GitHub 记录，不能伪造。
+#
+# 带 needs-human 标签的 PR（CI 失败次数到上限，见 ci-failure-limit.yml）不自动 approve；
+# 负责人去掉标签后（unlabeled 事件）重新 approve 并开启自动合并。
 name: PR gate
 
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, unlabeled]
 
 permissions:
   contents: write        # 自动合并需要
@@ -24,7 +27,8 @@ jobs:
     if: >-
       github.event.pull_request.user.login == github.repository_owner &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      !github.event.pull_request.draft
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'needs-human')
     runs-on: ubuntu-latest
     steps:
       - name: Approve
