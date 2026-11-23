@@ -101,9 +101,30 @@ scene.add(sun);
 // 真实的环境光：加载真实拍摄的城市 HDRI（CC0），用它照亮场景、反射到金属和玻璃上，并作为天空背景。
 // 加载在 loadAssets() 里完成；没加载成功时保留上面的渐变天空，游戏照常可以玩。
 let envTexture = null;
+const PBR = { ground: null, concrete: null, wood: null, metal: null };   // 真实材质（loadAssets 里加载）
 
 // 加载真实拍摄的城市 HDRI（CC0）：照亮场景、反射到表面，并作为天空背景。没加载成功时保留渐变天空，游戏照常可以玩。
 async function loadAssets() {
+  // 真实材质（ambientCG，CC0）：颜色 + 法线 + 粗糙度。每一套单独加载，加载失败就用程序生成的贴图。
+  const loader = new THREE.TextureLoader();
+  const loadSet = async (name, tile) => {
+    const base = `static/assets/pbr/${name}/${name}_1K-JPG_`;
+    try {
+      const [c, n, r] = await Promise.all([
+        loader.loadAsync(base + "Color.jpg"), loader.loadAsync(base + "NormalGL.jpg"), loader.loadAsync(base + "Roughness.jpg"),
+      ]);
+      c.colorSpace = THREE.SRGBColorSpace;
+      for (const t of [c, n, r]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.userData.tileM = tile; }
+      return { color: c, normal: n, rough: r, tile };
+    } catch (e) {
+      return null;
+    }
+  };
+  const [ground, concrete, wood, metal] = await Promise.all([
+    loadSet("PavingStones153", 2), loadSet("Concrete049", 2), loadSet("Wood099", 1), loadSet("Metal064", 1.5),
+  ]);
+  PBR.ground = ground; PBR.concrete = concrete; PBR.wood = wood; PBR.metal = metal;
+
   try {
     const exr = await new EXRLoader().loadAsync("static/assets/city.exr");
     exr.mapping = THREE.EquirectangularReflectionMapping;
@@ -455,34 +476,43 @@ document.addEventListener("touchmove", (e) => { if (e.touches.length > 1) e.prev
 
 function buildArena() {
   const h = map.half;
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(2 * h, 2 * h),
-    new THREE.MeshStandardMaterial({
-      map: tiled(TEX.plaza, 2 * h, 2 * h),
-      bumpMap: tiled(TEX.plazaBump, 2 * h, 2 * h), bumpScale: 0.5,
-      roughness: 0.9,
-    }),
-  );
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(2 * h, 2 * h), surface("ground", 2 * h, 2 * h));
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
 
   for (const [x0, y0, z0, x1, y1, z1] of map.walls) {
     const w = x1 - x0, d = z1 - z0, hgt = y1 - y0;
-    const tex = y1 < 2 ? TEX.wood : TEX.facade;      // 矮箱子是木箱，高墙是有窗户的楼房外墙
-    addBox((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, w, hgt, d, tiled(tex, Math.max(w, d), hgt));
+    // 矮箱子是木箱，高墙是楼房外墙（带窗户）
+    const mat = y1 < 2 ? surface("wood", Math.max(w, d), hgt) : surface("facade", Math.max(w, d), hgt);
+    addBox((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, w, hgt, d, mat);
   }
   // 四周的边界墙：厚 1 米，内侧正好在 ±half
-  addBox(0, 1.5, -h - 0.5, 2 * h + 2, 3, 1, tiled(TEX.metal, 2 * h + 2, 3));
-  addBox(0, 1.5, h + 0.5, 2 * h + 2, 3, 1, tiled(TEX.metal, 2 * h + 2, 3));
-  addBox(-h - 0.5, 1.5, 0, 1, 3, 2 * h, tiled(TEX.metal, 1, 3));
-  addBox(h + 0.5, 1.5, 0, 1, 3, 2 * h, tiled(TEX.metal, 1, 3));
+  addBox(0, 1.5, -h - 0.5, 2 * h + 2, 3, 1, surface("metal", 2 * h + 2, 3));
+  addBox(0, 1.5, h + 0.5, 2 * h + 2, 3, 1, surface("metal", 2 * h + 2, 3));
+  addBox(-h - 0.5, 1.5, 0, 1, 3, 2 * h, surface("metal", 1, 3));
+  addBox(h + 0.5, 1.5, 0, 1, 3, 2 * h, surface("metal", 1, 3));
   buildSkyline();
   arenaBuilt = true;
 }
 
+// 表面材质：真实材质（PBR）优先；没有就用程序生成的贴图。w、h 是这个面的大小（米），用来决定贴图重复几次。
+function surface(kind, w, h) {
+  const set = PBR[kind];
+  if (set) {
+    const rep = (t) => { const c = t.clone(); c.repeat.set(Math.max(w, 0.01) / set.tile, Math.max(h, 0.01) / set.tile); return c; };
+    return new THREE.MeshStandardMaterial({
+      map: rep(set.color), normalMap: rep(set.normal), roughnessMap: rep(set.rough), roughness: 1.0,
+      normalScale: new THREE.Vector2(1, 1),
+    });
+  }
+  const fallback = { ground: TEX.plaza, wood: TEX.wood, metal: TEX.metal, facade: TEX.facade }[kind];
+  return new THREE.MeshStandardMaterial({ map: tiled(fallback, w, h), roughness: 0.85, metalness: 0.05 });
+}
+
 // 竞技场外面的城市天际线：只用来做背景，玩家碰不到
 function buildSkyline() {
+  // 竞技场外面的城市天际线：只用来做背景，玩家碰不到
   const rnd = (a, b) => a + Math.random() * (b - a);
   for (let i = 0; i < 60; i++) {
     const w = rnd(8, 18), d = rnd(8, 16), hgt = rnd(12, 55);
@@ -492,12 +522,11 @@ function buildSkyline() {
     else if (i % 4 === 1) { x = along; z = out; }
     else if (i % 4 === 2) { x = -out; z = along; }
     else { x = out; z = along; }
-    addBox(x, hgt / 2, z, w, hgt, d, tiled(TEX.facade, Math.max(w, d), hgt));
+    addBox(x, hgt / 2, z, w, hgt, d, surface("facade", Math.max(w, d), hgt));
   }
 }
 
-function addBox(x, y, z, w, hgt, d, map_) {
-  const mat = new THREE.MeshStandardMaterial({ map: map_, roughness: 0.85, metalness: 0.05 });
+function addBox(x, y, z, w, hgt, d, mat) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), mat);
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
@@ -991,7 +1020,9 @@ function onWelcome(msg) {
   sim = msg.sim;
   map = msg.map;
   weapons = msg.sim.weapons;
-  if (!arenaBuilt) buildArena();
+  if (!arenaBuilt) {
+    loadPromise.then(() => { if (!arenaBuilt) buildArena(); });
+  }
   for (const r of remotes.values()) scene.remove(r.group);
   remotes.clear();
   names.clear();
@@ -1219,7 +1250,7 @@ $("reconnectBtn").addEventListener("click", () => {
 });
 i18n.onChange(() => { if (playing) { updateHint(); if (shopOpen) renderShop(); updateHud(); } if (lobby.me) renderLobby(); });
 
-loadAssets();                 // 环境光在后台加载，不影响进入大厅
+const loadPromise = loadAssets();   // 材质和环境光在后台加载，不影响进入大厅
 setStatus(tr("正在连接…"), false);
 openSocket();
 requestAnimationFrame(frame);
