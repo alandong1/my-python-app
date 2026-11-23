@@ -1,20 +1,27 @@
 "use strict";
 // Dev Lab 首页：应用商店 + 登录 + 我的账号
+// 翻译函数 t() 和切换逻辑见 static/i18n.js；英文译文见 static/lang.js
 const $ = (id) => document.getElementById(id);
-const S = { account: null, apps: [], providers: [], filter: "全部", next: null };
+const t = (zh, ...args) => i18n.t(zh, ...args);
+const S = { account: null, apps: [], providers: [], filter: "全部", next: null, version: null };
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// 项目名、简介有中英文两个版本（来自项目登记 name_en / description_en）
+function pick(zh, en) {
+  return i18n.lang === "en" && en ? en : zh;
+}
+
 let toastTimer;
 function toast(text, ok = false) {
-  const t = $("toast");
-  t.textContent = text;
-  t.classList.add("show");
-  t.classList.toggle("ok", ok);
+  const el = $("toast");
+  el.textContent = text;
+  el.classList.add("show");
+  el.classList.toggle("ok", ok);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
 async function api(path, body) {
@@ -24,7 +31,7 @@ async function api(path, body) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
     const d = data.detail;
-    const err = new Error(typeof d === "string" ? d : "请求失败，请检查输入");
+    const err = new Error(typeof d === "string" ? t(d) : t("请求失败，请检查输入"));
     err.status = r.status;
     throw err;
   }
@@ -40,7 +47,7 @@ function safeNext(p) {
 function renderFilters() {
   const cats = ["全部", ...new Set(S.apps.map((a) => a.category))];
   $("filters").innerHTML = cats.length > 2
-    ? cats.map((c) => `<button data-cat="${esc(c)}" class="${c === S.filter ? "active" : ""}">${esc(c)}</button>`).join("")
+    ? cats.map((c) => `<button data-cat="${esc(c)}" class="${c === S.filter ? "active" : ""}">${esc(t(c))}</button>`).join("")
     : "";
 }
 
@@ -51,18 +58,18 @@ function renderGrid() {
       <div class="head">
         <div class="icon">${esc(a.icon)}</div>
         <div>
-          <h3>${esc(a.name)}</h3>
-          <div class="meta"><span class="badge">${esc(a.category)}</span><span class="badge status">${esc(a.status)}</span></div>
+          <h3>${esc(pick(a.name, a.nameEn))}</h3>
+          <div class="meta"><span class="badge">${esc(t(a.category))}</span><span class="badge status">${esc(t(a.status))}</span></div>
         </div>
       </div>
-      <p>${esc(a.description)}</p>
-      <span class="open btn primary">打开</span>
+      <p>${esc(pick(a.description, a.descriptionEn))}</p>
+      <span class="open btn primary">${esc(t("打开"))}</span>
     </a>`).join("");
   if (S.filter === "全部") {
-    h += `<div class="card soon"><div class="head"><div class="icon">✨</div><div><h3>更多项目</h3>
-      <div class="meta"><span class="badge">开发中</span></div></div></div><p>新的游戏、工具和 AI 项目正在路上。</p></div>`;
+    h += `<div class="card soon"><div class="head"><div class="icon">✨</div><div><h3>${esc(t("更多项目"))}</h3>
+      <div class="meta"><span class="badge">${esc(t("开发中"))}</span></div></div></div><p>${esc(t("新的游戏、工具和 AI 项目正在路上。"))}</p></div>`;
   }
-  $("grid").innerHTML = h || `<p class="empty">这个分类下还没有项目。</p>`;
+  $("grid").innerHTML = h || `<p class="empty">${esc(t("这个分类下还没有项目。"))}</p>`;
 }
 
 $("filters").addEventListener("click", (e) => {
@@ -91,12 +98,16 @@ document.querySelectorAll(".modal").forEach((m) => m.addEventListener("click", (
 }));
 window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModals(); });
 
+function renderOauth() {
+  const q = S.next ? `?next=${encodeURIComponent(S.next)}` : "";
+  $("oauthBtns").innerHTML = S.providers.map((p) =>
+    `<a href="/api/auth/oauth/${p.id}/start${q}">${PROVIDER_ICON[p.id] || ""} ${esc(t("使用 {0} 登录", t(p.label)))}</a>`).join("");
+}
+
 function openLogin(next) {
   S.next = safeNext(next);
   $("loginErr").textContent = "";
-  const q = S.next ? `?next=${encodeURIComponent(S.next)}` : "";
-  $("oauthBtns").innerHTML = S.providers.map((p) =>
-    `<a href="/api/auth/oauth/${p.id}/start${q}">${PROVIDER_ICON[p.id] || ""} 使用 ${esc(p.label)} 登录</a>`).join("");
+  renderOauth();
   openModal("loginModal");
 }
 
@@ -118,7 +129,7 @@ async function doLogin(fn) {
     setAccount(await fn());
     if (S.next) { location.href = S.next; return; }
     closeModals();
-    toast("登录成功", true);
+    toast(t("登录成功"), true);
   } catch (e) {
     $("loginErr").textContent = e.message;
   }
@@ -159,23 +170,23 @@ async function renderAccount() {
   const a = await api("/me");
   setAccount(a);
   let h = `<div class="row"><b>${esc(a.displayName)}</b>
-    <span class="badge">${a.isGuest ? "游客" : a.username ? "正式账号" : "第三方账号"}</span></div>`;
-  if (a.username) h += `<div class="muted">用户名：${esc(a.username)}</div>`;
+    <span class="badge">${a.isGuest ? t("游客") : a.username ? t("正式账号") : t("第三方账号")}</span></div>`;
+  if (a.username) h += `<div class="muted">${esc(t("用户名：{0}", a.username))}</div>`;
   if (a.isGuest) {
-    h += `<p class="muted">游客身份只保存在这个浏览器里。绑定一个第三方账号后，就可以在其他设备上登录。</p>`;
+    h += `<p class="muted">${esc(t("游客身份只保存在这个浏览器里。绑定一个第三方账号后，就可以在其他设备上登录。"))}</p>`;
   } else {
-    h += `<h3>📧 邮箱</h3>`;
-    if (a.email) h += `<div class="row">${esc(a.email)} <span class="badge ok">已验证</span></div>`;
-    if (a.pendingEmail) h += `<div class="row muted">${esc(a.pendingEmail)} <span class="badge">待验证，请查收邮件</span></div>`;
-    h += `<form id="emailForm" class="row"><input name="email" type="email" placeholder="${a.email ? "更换邮箱" : "绑定邮箱"}" required>
-      <button>发送验证</button></form>`;
+    h += `<h3>${esc(t("📧 邮箱"))}</h3>`;
+    if (a.email) h += `<div class="row">${esc(a.email)} <span class="badge ok">${esc(t("已验证"))}</span></div>`;
+    if (a.pendingEmail) h += `<div class="row muted">${esc(a.pendingEmail)} <span class="badge">${esc(t("待验证，请查收邮件"))}</span></div>`;
+    h += `<form id="emailForm" class="row"><input name="email" type="email" placeholder="${esc(a.email ? t("更换邮箱") : t("绑定邮箱"))}" required>
+      <button>${esc(t("发送验证"))}</button></form>`;
   }
   if (S.providers.length) {
-    h += `<h3>🔗 第三方账号</h3>`;
+    h += `<h3>${esc(t("🔗 第三方账号"))}</h3>`;
     for (const p of S.providers) {
       h += a.linked.includes(p.id)
-        ? `<div class="row">${PROVIDER_ICON[p.id] || ""} ${esc(p.label)} <span class="badge ok">已绑定</span></div>`
-        : `<div class="row">${PROVIDER_ICON[p.id] || ""} ${esc(p.label)} <span class="grow"></span><a href="/api/auth/oauth/${p.id}/start?link=1"><button type="button">绑定</button></a></div>`;
+        ? `<div class="row">${PROVIDER_ICON[p.id] || ""} ${esc(t(p.label))} <span class="badge ok">${esc(t("已绑定"))}</span></div>`
+        : `<div class="row">${PROVIDER_ICON[p.id] || ""} ${esc(t(p.label))} <span class="grow"></span><a href="/api/auth/oauth/${p.id}/start?link=1"><button type="button">${esc(t("绑定"))}</button></a></div>`;
     }
   }
   $("accountBody").innerHTML = h;
@@ -184,7 +195,7 @@ async function renderAccount() {
     e.preventDefault();
     try {
       await api("/email", { email: new FormData(form).get("email") });
-      toast("验证邮件已发送，请查收", true);
+      toast(t("验证邮件已发送，请查收"), true);
       renderAccount();
     } catch (err) { toast(err.message); }
   };
@@ -200,8 +211,17 @@ $("logoutBtn").onclick = async () => {
   await api("/logout", {}).catch(() => {});
   setAccount(null);
   closeModals();
-  toast("已退出登录", true);
+  toast(t("已退出登录"), true);
 };
+
+// ============================================================ 语言切换后重新渲染动态内容
+// 静态文字由 i18n.js 自动替换；这里只处理用 JS 生成的部分
+i18n.onChange(() => {
+  renderFilters(); renderGrid();
+  if (S.version) $("version").textContent = t("版本 {0}", S.version);
+  if (!$("loginModal").hidden) renderOauth();
+  if (!$("accountModal").hidden) renderAccount().catch(() => {});
+});
 
 // ============================================================ 启动
 async function boot() {
@@ -219,7 +239,7 @@ async function boot() {
   $("oauthBox").hidden = !S.providers.length;
   setAccount(me);
   renderFilters(); renderGrid();
-  if (version) $("version").textContent = `版本 ${version.commit}`;
+  if (version) { S.version = version.commit; $("version").textContent = t("版本 {0}", version.commit); }
 
   // 其他页面跳转过来时带的参数：login=1 打开登录；next=登录后要去的页面；account=1 打开我的账号
   const next = safeNext(q.get("next"));
