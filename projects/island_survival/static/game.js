@@ -5,6 +5,9 @@ const $ = (id) => document.getElementById(id);
 const TERRAIN_H = [-0.8, -0.3, 0.05, 0.25, 0.3];                       // 深海 浅海 沙滩 草地 森林
 const TERRAIN_C = ['#1e4d7a', '#4fa3c7', '#e8d59a', '#6fae4d', '#3d7a3a'];
 const ROLE_COLOR = { chef: 0xe07b39, doctor: 0xf2f2f2, priest: 0x7a5cc4 };
+// 远端玩家和动物按「过去 100 毫秒」的画面显示：服务器每 0.1 秒发一次，网络有快有慢，
+// 延迟 100 毫秒后就有两个快照可以匀速插值，画面不会一顿一顿。（和 strike 的做法相同）
+const INTERP_MS = 100;
 
 let ws = null, role = null, myId = null, info = null, latest = null;
 let scene, camera, renderer, me = null;
@@ -12,10 +15,9 @@ let yaw = Math.PI, dragging = false, lastX = 0;
 const players = new Map(), animals = new Map(), fires = new Map(), trees = new Map();
 const keys = new Set();
 let joy = { x: 0, y: 0 };
-let lastInvKey = '', toastTimer = 0;
+let lastInvKey = '', toastTimer = 0, lastFrame = 0;
 const shared = {};
-let lastFrame = 0;
-const focus = new THREE.Vector3();   // 镜头盯着的点（平滑后的位置）
+const focus = new THREE.Vector3();   // 镜头盯着的点
 
 // ------------------------------------------------------------ 连接与消息
 
@@ -35,6 +37,12 @@ function connect() {
 
 function send(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+// 把当前的移动方向发给服务器；按键、拖动、摇杆变化时立即调用，不等下一次定时发送
+function sendMove() {
+  const v = moveVector();
+  send({ type: 'move', dx: v.dx, dz: v.dz });
 }
 
 function onMessage(msg) {
@@ -136,7 +144,24 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
-// 地形：每个格子的四个角是一个顶点，颜色和高度来自地形编号
+// 地形顶点（格子的角）的高度。地形网格和 heightAt() 都用它，保证人站在地面上。
+function vertexHeight(i, j) {
+  const tx = Math.min(info.w - 1, i), tz = Math.min(info.h - 1, j);
+  const t = info.terrain.charCodeAt(tz * info.w + tx) - 48;
+  return TERRAIN_H[t] + (t >= 2 ? 0.05 * Math.sin(i * 0.7) * Math.cos(j * 0.6) : 0);
+}
+
+// 任意位置的地面高度：在周围四个顶点之间做双线性插值，所以走过格子边界时不会阶跃
+function terrainHeight(x, z) {
+  const i = Math.min(info.w - 1, Math.max(0, Math.floor(x)));
+  const j = Math.min(info.h - 1, Math.max(0, Math.floor(z)));
+  const fx = Math.min(1, Math.max(0, x - i)), fz = Math.min(1, Math.max(0, z - j));
+  const h00 = vertexHeight(i, j), h10 = vertexHeight(i + 1, j);
+  const h01 = vertexHeight(i, j + 1), h11 = vertexHeight(i + 1, j + 1);
+  return h00 * (1 - fx) * (1 - fz) + h10 * fx * (1 - fz) + h01 * (1 - fx) * fz + h11 * fx * fz;
+}
+
+// 地形：每个格子的四个角是一个顶点，颜色来自地形编号
 function buildTerrain() {
   const W = info.w, H = info.h, T = info.terrain;
   const pos = new Float32Array((W + 1) * (H + 1) * 3);
@@ -146,9 +171,8 @@ function buildTerrain() {
     for (let i = 0; i <= W; i++) {
       const tx = Math.min(i, W - 1), tz = Math.min(j, H - 1);
       const t = T.charCodeAt(tz * W + tx) - 48;
-      const h = TERRAIN_H[t] + (t >= 2 ? 0.05 * Math.sin(i * 0.7) * Math.cos(j * 0.6) : 0);
       const k = (j * (W + 1) + i) * 3;
-      pos[k] = i; pos[k + 1] = h; pos[k + 2] = j;
+      pos[k] = i; pos[k + 1] = vertexHeight(i, j); pos[k + 2] = j;
       c.set(TERRAIN_C[t]);
       col[k] = c.r; col[k + 1] = c.g; col[k + 2] = c.b;
     }
@@ -262,6 +286,33 @@ function nameTag(text) {
   return sprite;
 }
 
+// ------------------------------------------------------------ 快照插值
+
+// 记下服务器给的位置和收到的时间（用浏览器的时钟，不用服务器时间）
+function pushSample(mesh, x, z) {
+  const now = performance.now();
+  const s = mesh.userData.samples;
+  s.push({ t: now, x, z });
+  while (s.length > 2 && s[0].t < now - 1000) s.shift();
+}
+
+// 取 renderT 时刻的位置：在两个快照之间匀速插值。返回 {x, z, vx, vz}
+function sampleAt(mesh, renderT) {
+  const s = mesh.userData.samples;
+  if (!s || !s.length) return null;
+  if (renderT <= s[0].t) return { x: s[0].x, z: s[0].z, vx: 0, vz: 0 };
+  const last = s[s.length - 1];
+  if (renderT >= last.t) return { x: last.x, z: last.z, vx: 0, vz: 0 };
+  for (let i = s.length - 2; i >= 0; i--) {
+    const a = s[i], b = s[i + 1];
+    if (a.t <= renderT) {
+      const k = (renderT - a.t) / ((b.t - a.t) || 1);
+      return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, vx: b.x - a.x, vz: b.z - a.z };
+    }
+  }
+  return { x: s[0].x, z: s[0].z, vx: 0, vz: 0 };
+}
+
 // ------------------------------------------------------------ 把服务器状态画出来
 
 function applyState(s) {
@@ -274,7 +325,7 @@ function applyState(s) {
   $('meName').textContent = m.name;
   $('dead').hidden = !m.dead;
 
-  // 其他玩家
+  // 所有玩家（包括自己）
   const seen = new Set();
   for (const p of s.players) {
     const [id, , , x, z] = p;
@@ -282,11 +333,12 @@ function applyState(s) {
     let mesh = players.get(id);
     if (!mesh) {
       mesh = makePlayer(p);
-      mesh.position.set(x, 0, z);
+      mesh.userData = { samples: [] };
+      mesh.position.set(x, terrainHeight(x, z), z);
       scene.add(mesh);
       players.set(id, mesh);
     }
-    mesh.userData.tx = x; mesh.userData.tz = z;
+    pushSample(mesh, x, z);
     mesh.userData.dead = p[5];
   }
   removeMissing(players, seen);
@@ -300,11 +352,12 @@ function applyState(s) {
     let mesh = animals.get(id);
     if (!mesh) {
       mesh = makeAnimal(kind);
-      mesh.position.set(x, 0, z);
+      mesh.userData = { samples: [] };
+      mesh.position.set(x, terrainHeight(x, z), z);
       scene.add(mesh);
       animals.set(id, mesh);
     }
-    mesh.userData.tx = x; mesh.userData.tz = z;
+    pushSample(mesh, x, z);
   }
   removeMissing(animals, aseen);
 
@@ -331,20 +384,13 @@ function applyState(s) {
       rseen.add(id);
       if (!trees.has(id)) {
         const mesh = kind === 'tree' ? makeTree(id) : kind === 'bush' ? makeBush() : makeHerb();
-        mesh.position.set(x + 0.5, terrainHeight(x, z), z + 0.5);
+        mesh.position.set(x + 0.5, terrainHeight(x + 0.5, z + 0.5), z + 0.5);
         scene.add(mesh);
         trees.set(id, mesh);
       }
     }
     removeMissing(trees, rseen);
   }
-}
-
-function terrainHeight(x, z) {
-  const tx = Math.min(info.w - 1, Math.max(0, Math.floor(x)));
-  const tz = Math.min(info.h - 1, Math.max(0, Math.floor(z)));
-  const t = info.terrain.charCodeAt(tz * info.w + tx) - 48;
-  return TERRAIN_H[t];
 }
 
 function removeMissing(map, seen) {
@@ -363,6 +409,11 @@ function setBars(m) {
   bar('Sanity', m.sanity);
   $('sickBadge').hidden = !m.sick;
 }
+
+const USABLE = {
+  coconut: '吃', berry: '吃', raw_fish: '吃', raw_meat: '吃',
+  cooked_fish: '吃', cooked_meat: '吃', medicine: '用',
+};
 
 function setInventory(inv) {
   const key = JSON.stringify(inv);
@@ -391,11 +442,6 @@ function setInventory(inv) {
     ul.append(li);
   }
 }
-
-const USABLE = {
-  coconut: '吃', berry: '吃', raw_fish: '吃', raw_meat: '吃',
-  cooked_fish: '吃', cooked_meat: '吃', medicine: '用',
-};
 
 function setLog(events) {
   for (const text of events || []) {
@@ -485,13 +531,6 @@ function setupInput() {
   joyEl.addEventListener('pointercancel', endJoy);
 }
 
-// 把当前的移动方向发给服务器；按键、拖动、摇杆变化时立即调用，不等下一次定时发送
-function sendMove() {
-  if (!me && !ws) return;
-  const v = moveVector();
-  send({ type: 'move', dx: v.dx, dz: v.dz });
-}
-
 // 根据按键和摇杆，算出在世界里走的方向（相对镜头）
 function moveVector() {
   let fwd = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
@@ -509,29 +548,30 @@ function frame(now) {
   requestAnimationFrame(frame);
   if (!me || !scene) return;
   const t = now / 1000;
-  // 按真实经过的时间平滑（和帧率无关），服务器每 0.1 秒给一次位置，这里把它们连成顺滑的动作
   const dt = lastFrame ? Math.min(0.05, (now - lastFrame) / 1000) : 0.016;
   lastFrame = now;
-  const k = 1 - Math.exp(-dt * 14);
 
+  // 人物和动物：按 100 毫秒前的时间线，在两个快照之间匀速移动
+  const renderT = performance.now() - INTERP_MS;
   for (const mesh of players.values()) {
-    const dx = mesh.userData.tx - mesh.position.x, dz = mesh.userData.tz - mesh.position.z;
-    mesh.position.x += dx * k;
-    mesh.position.z += dz * k;
-    mesh.position.y = terrainHeight(mesh.position.x, mesh.position.z);
-    if (Math.hypot(dx, dz) > 0.02) mesh.rotation.y = Math.atan2(dx, dz);
-    mesh.rotation.z += ((mesh.userData.dead ? Math.PI / 2 : 0) - mesh.rotation.z) * Math.min(1, dt * 10);
+    const s = sampleAt(mesh, renderT);
+    if (!s) continue;
+    mesh.position.set(s.x, terrainHeight(s.x, s.z), s.z);
+    if (Math.abs(s.vx) + Math.abs(s.vz) > 1e-4) mesh.rotation.y = Math.atan2(s.vx, s.vz);
+    const target = mesh.userData.dead ? Math.PI / 2 : 0;
+    mesh.rotation.z += (target - mesh.rotation.z) * Math.min(1, dt * 10);
   }
   for (const mesh of animals.values()) {
-    mesh.position.x += (mesh.userData.tx - mesh.position.x) * k;
-    mesh.position.z += (mesh.userData.tz - mesh.position.z) * k;
-    mesh.position.y = terrainHeight(mesh.position.x, mesh.position.z);
+    const s = sampleAt(mesh, renderT);
+    if (!s) continue;
+    mesh.position.set(s.x, terrainHeight(s.x, s.z), s.z);
+    if (Math.abs(s.vx) + Math.abs(s.vz) > 1e-4) mesh.rotation.y = Math.atan2(s.vx, s.vz);
   }
   for (const g of fires.values()) {
     g.children[0].scale.setScalar(0.9 + 0.15 * Math.sin(t * 12 + g.position.x));
   }
 
-  // 镜头盯着自己「平滑后」的模型，而不是服务器的原始位置，所以不会一顿一顿地跳
+  // 镜头盯着自己的模型（同样是插值后的位置），再平滑地跟过去
   const mine = players.get(myId);
   const fx = mine ? mine.position.x : me.x;
   const fz = mine ? mine.position.z : me.z;
