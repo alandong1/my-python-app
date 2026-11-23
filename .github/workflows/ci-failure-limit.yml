@@ -1,0 +1,71 @@
+# 防止 AI agent 在一个 PR 上无限循环地「修 → push → CI 失败 → 再修」烧 token。
+#
+# 同一个 PR 的 CI 失败满 MAX_FAILURES 次时：
+#   - 打上 needs-human 标签（agent 看到这个标签必须停手，见 AGENTS.md）
+#   - 关闭自动合并
+#   - 在 PR 上留言通知负责人
+# 负责人处理后去掉 needs-human 标签，计数从零重新开始。
+#
+# 用 workflow_run：运行的是 main 上的这个文件，不运行 PR 里的代码。
+# 别人 fork 来的 PR 不在这里计数（它们本来就要负责人人工审核）。
+name: CI failure limit
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write        # 关闭自动合并需要
+  pull-requests: write   # 打标签、留言
+  issues: write          # 创建标签
+  actions: read          # 读取 CI 运行记录
+
+env:
+  MAX_FAILURES: 3
+  LABEL: needs-human
+
+jobs:
+  count-failures:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Count CI failures on this PR
+        run: |
+          set -euo pipefail
+          labels=$(gh pr view "$PR" --json labels -q '[.labels[].name] | join(",")')
+          if [[ ",$labels," == *",$LABEL,"* ]]; then
+            echo "PR #$PR 已经是 $LABEL 状态，不重复处理。"
+            exit 0
+          fi
+
+          # 从哪个时间点开始数：PR 创建时间，或者负责人最近一次去掉 needs-human 标签的时间
+          since=$(gh pr view "$PR" --json createdAt -q .createdAt)
+          reset=$(gh api "repos/$GH_REPO/issues/$PR/events" --paginate \
+            -q "[.[] | select(.event == \"unlabeled\" and .label.name == \"$LABEL\") | .created_at] | last // empty" | tail -n 1)
+          if [ -n "$reset" ]; then since="$reset"; fi
+
+          fails=$(gh run list --workflow ci.yml --branch "$BRANCH" --event pull_request \
+            --status failure --limit 100 --json createdAt \
+            -q "[.[] | select(.createdAt >= \"$since\")] | length")
+          echo "PR #$PR 从 $since 起 CI 失败 $fails 次（上限 $MAX_FAILURES）"
+
+          if [ "$fails" -ge "$MAX_FAILURES" ]; then
+            gh label create "$LABEL" --color D93F0B \
+              --description "AI 自动修复次数已用完，需要负责人介入" 2>/dev/null || true
+            gh pr edit "$PR" --add-label "$LABEL"
+            gh pr merge "$PR" --disable-auto || true
+            gh pr comment "$PR" --body "⛔ 这个 PR 的 CI 已经失败 $fails 次，达到上限（$MAX_FAILURES 次）。
+
+          已打上 \`$LABEL\` 标签并关闭自动合并。**AI agent 不要再 push 修复**，等负责人 @${{ github.repository_owner }} 处理。
+
+          负责人：看过之后，去掉 \`$LABEL\` 标签即可让 agent 继续（计数从零开始）；或者直接关闭这个 PR。"
+          fi
