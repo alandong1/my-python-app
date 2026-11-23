@@ -2,13 +2,19 @@
 # 分支保护要求这里的检查（scope、test (3.9)、test (3.12)）通过，PR 才能合并。
 #
 # 跑哪些测试由 scripts/changes.py 按改动决定：只改了一个项目就只跑平台测试 + 这个项目的测试；
-# 改了平台代码就全部跑。合并进 main 之后总是全部跑一遍。
+# 改了平台代码就全部跑。负责人手动合并进 main 时会全部跑一遍（自动合并由机器人完成，不会触发）。
 name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
+  # sync-prs.yml 把 main 同步进 PR 后用它触发（GITHUB_TOKEN 推送的提交不会触发 pull_request）
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 和哪个提交比较来选测试、检查范围（一般是 main 的最新提交）
+        required: false
 
 permissions:
   contents: read
@@ -25,7 +31,7 @@ jobs:
           fetch-depth: 0
       - id: pick
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: |
           if [ -n "$BASE" ]; then
             targets=$(python3 scripts/changes.py tests --base "$BASE")
@@ -37,14 +43,14 @@ jobs:
 
   # 一个 PR 只能改一个项目，或者只改平台
   scope:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.base != '')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: python3 scripts/changes.py scope --base "$BASE"
 
   test:

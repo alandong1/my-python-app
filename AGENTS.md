@@ -33,7 +33,7 @@
 | `docs/requirements.md` | **平台**的需求与设计决定 |
 | `scripts/changes.py` | 按改动的文件选测试（`run`）、检查 PR 改动范围（`scope`） |
 | `scripts/wait_for_deploy.sh` | 等待 PR 合并进 `main`、Render 部署上线 |
-| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试和改动范围检查，`pr-gate.yml` PR 审核规则，`ci-failure-limit.yml` CI 失败次数上限 |
+| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试和改动范围检查，`pr-gate.yml` PR 审核规则，`ci-failure-limit.yml` CI 失败次数上限，`sync-prs.yml` 自动把 main 同步进落后的 PR |
 | `deploy.conf` | 测试环境地址（非机密，正式来源；`README.md` 里有一份抄录） |
 
 ## 常用命令
@@ -70,6 +70,7 @@ scripts/wait_for_deploy.sh                                               # 开 P
    - 合并方式用 **merge commit**，不要 squash 或 rebase，否则 `wait_for_deploy.sh` 判断不出提交是否已合并。
 4. **等待合并并部署上线**：运行 `scripts/wait_for_deploy.sh`。它先等当前提交合并进 `main`，再轮询 `/version`，直到线上版本等于合并后的 `main`。
    - CI 测试失败时 PR 不会合并：修好后在同一个分支上再 push，PR 会自动更新。
+   - PR 落后于 `main`（别的 PR 先合并了）时，`.github/workflows/sync-prs.yml` 会自动把 `main` 合并进来、重新跑测试，不用管。**有冲突时它做不了**，会在 PR 上留言：这时在自己的分支上 `git fetch origin main && git merge origin/main`，解决冲突、跑测试后再 push。
    - **自动修复的次数上限（防止死循环烧 token）**：
      - 同一个 PR，AI 最多自己修 **3 轮**（CI 失败一次、或审核打回一次，各算一轮）。第 3 轮还不行，就**停止 push**，在 PR 上留言写清楚卡在哪、试过什么，然后通知负责人，等人工介入。
      - `.github/workflows/ci-failure-limit.yml` 会强制执行：同一个 PR 的 CI 失败满 3 次，自动打上 **`needs-human`** 标签、关闭自动合并、留言通知负责人。
@@ -83,7 +84,7 @@ scripts/wait_for_deploy.sh                                               # 开 P
 
 ## 新建项目
 
-1. 和负责人确认：项目名、`slug`（网址里的英文名，小写字母开头，只能有小写字母、数字、连字符）、图标、分类、是否需要登录。
+1. 和负责人确认：项目名、`slug`（网址里的英文名，小写字母开头，只能有小写字母、数字、连字符）、图标、分类、是否需要登录，以及**技术选型**（见下一节「技术选型」）。
 2. 建目录 `projects/<slug>/`，至少包含：
    - `__init__.py`：定义 `PROJECT = Project(...)`（参考 `projects/lordwar/__init__.py`）
    - `server.py`：`router = APIRouter()`，至少有 `@router.get("/")` 返回 `html_page(STATIC / "index.html")`
@@ -97,6 +98,40 @@ scripts/wait_for_deploy.sh                                               # 开 P
 - **账户**：HTTP 接口里用 `app.auth.require_user`；WebSocket 里先 `ws_same_origin(ws)`，再用 `lookup_session_user(ws.cookies.get(SESSION_COOKIE))`。页面里没登录时跳转到 `/?login=1&next=<当前路径>`。
 - **存档**：`app.persistence` 的 `save_snapshot` / `load_latest`，用自己的 slug 区分。
 - **启动/关闭钩子**：`Project.startup` / `shutdown`，比如启动后台循环、关闭前存档。
+
+## 技术选型
+
+新建项目（或者项目的需求发生大的变化）时，AI 要**根据这个项目的需求选择语言和架构**，不要不假思索地照搬上一个项目。
+
+**「最合适」不等于「运行最快」**，综合看四点，按重要程度排列：
+1. **能满足需求**：性能够用、能在目标设备上运行（浏览器 / 手机 / 电脑）。
+2. **开发效率**：同样的功能，代码少、调试容易、有成熟的库。
+3. **部署和维护成本**：能不能放进现有平台（同一个网站、同一个 Render 服务、同一个数据库）。每多一种语言或一个服务，就多一份部署、监控和费用。
+4. **负责人能看懂**：负责人在学习开发，优先选主流、资料多的技术。
+
+**默认技术栈**（没有特殊需求就用这个，可以直接放进平台）：
+- 前端：原生 JavaScript（HTML + CSS），运行在浏览器里，电脑和手机都能用。
+- 后端：Python + FastAPI，作为平台里的一个项目（`projects/<slug>/`）。
+- 数据库：平台的 PostgreSQL，表名加 `<slug>_` 前缀。
+
+**按需求选择**：
+
+| 项目需求 | 推荐 | 放在哪里 |
+|---|---|---|
+| 简单的网页游戏 / 小工具，逻辑都在浏览器里 | 纯前端 JavaScript，服务器只负责发网页 | 平台内（例如 `snake`） |
+| 多人实时互动、需要服务器保存状态 | 前端 JavaScript + 后端 Python（WebSocket） | 平台内（例如 `lordwar`） |
+| 复杂的 2D 网页游戏（大量动画、物理效果） | JavaScript/TypeScript + 游戏引擎（如 Phaser） | 平台内，引擎文件放项目的 `static/` |
+| 前端代码很多、多人维护 | 考虑 TypeScript，需要加构建步骤，先和负责人商量 | 平台内 |
+| AI / 数据处理 | Python（生态最好）；耗时的计算放线程池，不要卡住事件循环 | 平台内；需要大量内存或 GPU 时单独部署 |
+| 服务器要同时承载成千上万人、每秒大量计算 | Go / Rust / Java / C# 等编译型语言 | **单独部署**，商店用 `external_url` 登记 |
+| 3D 游戏、要上架 Steam 或主机 | Unity（C#）/ Godot / Unreal（C++） | 单独的仓库或服务；能导出网页版的，可以挂到商店 |
+| 必须上架 App Store / Google Play 的手机 App | Flutter 或 React Native（一套代码两个平台）；需要深度用到手机功能时用 Swift / Kotlin | 单独的仓库；需要服务器时可以复用平台的接口 |
+
+**规则**：
+- 选默认技术栈时，直接开始。
+- **要用默认以外的语言、框架、构建工具，或者要单独部署时，先告诉负责人**：选了什么、为什么默认的不够用、会多出哪些部署和费用，等负责人同意再开始。
+- 不管选了什么，都把**选型和理由**写进项目的 `REQUIREMENTS.md`（「技术选型」一节），以后的 agent 才知道为什么这么选、什么情况下该换。
+- 不要为了「更快」过早优化：先用简单的方案做出来，真的遇到性能问题（有数据证明），再针对瓶颈优化或换技术。
 
 ## 项目之间的边界
 
@@ -131,10 +166,11 @@ scripts/wait_for_deploy.sh                                               # 开 P
 |---|---|---|
 | 平台需求（账户、首页、部署、跨项目约定） | `docs/requirements.md` | — |
 | 某个项目的需求 / 玩法 | `projects/<slug>/REQUIREMENTS.md` | — |
+| 项目的技术选型 | 项目 `REQUIREMENTS.md` 的「技术选型」一节；改默认技术栈时改 `AGENTS.md`「技术选型」 | 单独部署的项目：新服务的部署和费用 |
 | 新增 / 删除项目 | 只有 `projects/<slug>/` 目录本身（自动发现，不用登记） | — |
 | 项目名称 / 图标 / 分类 / 状态 | `projects/<slug>/__init__.py` 的 `PROJECT` | — |
 | 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要；`docs/requirements.md`「环境与部署」 | — |
-| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`.github/workflows/ci-failure-limit.yml`、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」（现在是 `scope`、`test (3.9)`、`test (3.12)`）也要跟着改 |
+| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`.github/workflows/ci-failure-limit.yml`、`.github/workflows/sync-prs.yml`（它重复了 `pr-gate.yml` 的自动 approve 条件，两处要一致）、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」（现在是 `scope`、`test (3.9)`、`test (3.12)`）也要跟着改 |
 | 编码规范 | `AGENTS.md`「规范」；重要的同步到 `.github/copilot-instructions.md` | — |
 | 测试环境网址 | `deploy.conf`、`README.md`「环境与网址」 | Render 环境变量 `PUBLIC_BASE_URL`；已启用的 OAuth 在 Google/Apple/微信后台的回调地址 |
 | 换部署平台 / 服务器 | `deploy.conf`、`render.yaml`、`app/settings.py`（`IS_RENDER`、`GIT_COMMIT` 的来源）、`app/main.py` 里的 Render 判断、`AGENTS.md`「环境」、`README.md` | 新平台的环境变量；OAuth 回调地址 |
