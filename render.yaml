@@ -1,0 +1,16 @@
+# Render Blueprint：在 Render 上选 New → Blueprint 并指向本仓库即可按此配置部署
+services:
+  - type: web
+    name: my-python-app
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Render 通过 $PORT 告诉程序用哪个端口；0.0.0.0 让外部请求能连进来
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    # 游戏状态在内存里，只能有一个实例
+    numInstances: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
