@@ -5,13 +5,25 @@
 #   scripts/wait_for_deploy.sh            # 等待当前 HEAD 上线
 #   scripts/wait_for_deploy.sh a7e4c54    # 等待指定提交上线
 # 环境变量：
-#   DEPLOY_URL   测试环境地址（默认见下）
+#   DEPLOY_URL   测试环境地址（默认读取 deploy.conf）
 #   TIMEOUT      最长等待秒数（默认 600）
 #
 # 退出码：0 = 已上线；1 = 超时；2 = 参数或环境错误
 set -euo pipefail
 
-URL="${DEPLOY_URL:-https://my-python-app-m3qj.onrender.com}"
+# 无论从哪个目录运行，都切换到仓库根目录（git 命令和 deploy.conf 都依赖它）
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+# 地址优先取环境变量 DEPLOY_URL，否则读仓库根目录的 deploy.conf
+if [ -z "${DEPLOY_URL:-}" ] && [ -f "$ROOT/deploy.conf" ]; then
+  DEPLOY_URL="$(sed -n 's/^DEPLOY_URL=//p' "$ROOT/deploy.conf" | tail -1)"
+fi
+URL="${DEPLOY_URL:-}"
+if [ -z "$URL" ]; then
+  echo "错误：没有找到测试环境地址。请在 deploy.conf 里设置 DEPLOY_URL。" >&2
+  exit 2
+fi
 TIMEOUT="${TIMEOUT:-600}"
 WANT="${1:-$(git rev-parse --short=7 HEAD)}"
 WANT="${WANT:0:7}"

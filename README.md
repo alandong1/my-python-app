@@ -36,7 +36,7 @@ cp .env.example .env        # 按需填写，全部留空也能运行
 
 ## 开发
 
-开发流程和规范见 [AGENTS.md](AGENTS.md)（AI 编程助手和人都按它来）。
+开发流程和规范见 [AGENTS.md](AGENTS.md)（AI 编程助手和人都按它来），需求与设计决定见 [docs/requirements.md](docs/requirements.md)。
 
 ```bash
 .venv/bin/pip install -r requirements-dev.txt

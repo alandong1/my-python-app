@@ -22,6 +22,8 @@
 | `static/` | 前端（`index.html`、`game.js`、`style.css`） |
 | `tests/` | pytest 测试 |
 | `scripts/wait_for_deploy.sh` | push 后等待 Render 部署上线 |
+| `deploy.conf` | 测试环境地址（非机密，唯一来源） |
+| `docs/requirements.md` | **需求与设计决定**：做什么、为什么这样做、待办 |
 
 ## 常用命令
 
@@ -34,6 +36,8 @@ scripts/wait_for_deploy.sh                                               # push 
 
 ## 开发流程（必须遵守）
 
+0. **需求有变化时，先更新 `docs/requirements.md`**（新增/修改/放弃的需求、做出的设计决定及原因），再动代码。
+   负责人在对话里提出的需求，如果会影响以后的开发，都要记进去，不能只留在聊天记录里。
 1. **改代码。**
 2. **本地测试**：运行 `.venv/bin/python -m pytest -q`，必须全部通过。
    - 新功能或修 bug 时，在 `tests/` 里补充对应测试。
@@ -42,6 +46,7 @@ scripts/wait_for_deploy.sh                                               # push 
    `git add <具体文件>` → `git commit` → `git push origin main`
 4. **等待部署上线**：运行 `scripts/wait_for_deploy.sh`。它会轮询 `/version`，直到线上版本等于刚推送的提交。
 5. **通知负责人刷新页面**，并说明改了什么。提醒：每次部署都会**重置游戏世界**（账号不受影响）。
+   如果这次改动需要负责人在**外部网站**上操作（见下面「改动时同步更新的文件」里的 🖐️ 项），必须逐条列出。
 
 测试没通过就不要 push。部署超时就去看 Render 的 Events/Logs，不要假装已上线。
 
@@ -49,7 +54,7 @@ scripts/wait_for_deploy.sh                                               # push 
 
 | | 本地开发 | 远程测试环境 |
 |---|---|---|
-| 地址 | http://localhost:8000 | https://my-python-app-m3qj.onrender.com |
+| 地址 | http://localhost:8000 | 见 `deploy.conf` 的 `DEPLOY_URL`（唯一来源） |
 | 数据库 | 未设置 `DATABASE_URL` 时用 SQLite `dev.db` | Neon PostgreSQL（us-east-2） |
 | 部署 | — | push 到 `main` 后 Render 自动部署（约 1–5 分钟） |
 
@@ -57,6 +62,24 @@ scripts/wait_for_deploy.sh                                               # push 
 - `/version` 返回线上的提交号和数据库类型；`/health` 返回在线人数。
 - 游戏世界在**内存**里，重启/部署即清空；账户和登录会话在数据库里，会保留。
 - 在 Render 上没有 `DATABASE_URL` 时服务会拒绝启动（防止悄悄用临时 SQLite 丢数据）。
+
+## 改动时同步更新的文件
+
+每次改动后对照这张表，把相关文件一起改掉，放在**同一个提交**里。
+🖐️ = 在 repo 之外、AI 无法操作的设置，必须明确告诉负责人去哪里改、改成什么。
+
+| 改动类型 | repo 里要同步更新的 | 🖐️ 需要负责人在外部操作的 |
+|---|---|---|
+| 功能需求 / 玩法规则 | `docs/requirements.md`；玩法变化较大时同步 `README.md` 的「玩法」 | — |
+| 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要 | — |
+| 编码规范 | `AGENTS.md`「规范」；重要的同步到 `.github/copilot-instructions.md` | — |
+| 测试环境网址 | `deploy.conf` | Render 环境变量 `PUBLIC_BASE_URL`；已启用的 OAuth 在 Google/Apple/微信后台的回调地址 |
+| 换部署平台 / 服务器 | `deploy.conf`、`render.yaml`、`app/settings.py`（`IS_RENDER`、`GIT_COMMIT` 的来源）、`app/main.py` 里的 Render 判断、`AGENTS.md`「环境」、`README.md` | 新平台的环境变量；OAuth 回调地址 |
+| 换数据库 | `AGENTS.md`「环境」、`.env.example` | 新平台上的 `DATABASE_URL`；负责人本地 `.env` |
+| 新增 / 删除环境变量 | `app/settings.py`、`.env.example`；线上也需要的加进 `render.yaml` | Render 上填写实际值 |
+| 数据库表结构 | `app/db.py`；见「规范 → 数据库」 | 已有表需要在 Neon 上执行迁移 |
+| 新增依赖 | `requirements.txt`（或 `requirements-dev.txt`），固定版本号 | — |
+| 新增 API / 前端操作 | 对应的 `tests/`；用户可见的操作写进 `README.md`「操作」 | — |
 
 ## 规范
 
