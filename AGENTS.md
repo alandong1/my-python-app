@@ -37,7 +37,7 @@
 | `projects/lordwar/` | 项目一：多人实时策略游戏「领主战争」 |
 | `tests/` | 平台层的测试（账户、OAuth、首页、项目挂载） |
 | `conftest.py` | 所有测试共用的配置（临时数据库、测试客户端） |
-| `docs/requirements.md` | **平台**的需求与设计决定 |
+| `docs/requirements.md` | **平台**的需求与设计决定，以及**待办清单**（第 5 节「待办与想法」；负责人问「待办有哪些」时看这里） |
 | `scripts/changes.py` | 按改动的文件选测试（`run`）、检查 PR 改动范围（`scope`） |
 | `scripts/wait_for_deploy.sh` | 等待 PR 合并进 `main`、Render 部署上线 |
 | `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试和改动范围检查，`pr-gate.yml` PR 审核规则，`ci-failure-limit.yml` CI 失败次数上限 |
