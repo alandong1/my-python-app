@@ -61,11 +61,62 @@ scene.add(sun);
 
 const tracerMat = new THREE.LineBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.9 });
 
-window.addEventListener("resize", () => {
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
-  camera.aspect = window.innerWidth / window.innerHeight;
+function fitToWindow() {
+  // 用可见区域的真实尺寸（手机地址栏收起或展开时会变），而不是 CSS 的 100vh
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-});
+}
+window.addEventListener("resize", fitToWindow);
+window.addEventListener("orientationchange", () => setTimeout(fitToWindow, 300));
+fitToWindow();
+
+// ---------------------------------------------------------------- 全屏与防误缩放
+
+const fsEl = document.documentElement;
+const fullscreenSupported = !!(fsEl.requestFullscreen || fsEl.webkitRequestFullscreen);
+const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+async function enterFullscreen() {
+  if (!fullscreenSupported || isFullscreen()) return;
+  try {
+    const req = fsEl.requestFullscreen ? fsEl.requestFullscreen() : fsEl.webkitRequestFullscreen();
+    await req;
+    // Android Chrome 允许在全屏时锁定横屏；iPhone 的 Safari 不支持，失败就忽略
+    if (screen.orientation && screen.orientation.lock) await screen.orientation.lock("landscape").catch(() => {});
+  } catch (e) {
+    // 浏览器拒绝全屏（例如 iPhone 的 Safari）：页面照常运行，只是没有全屏
+  }
+}
+
+function exitFullscreen() {
+  if (!isFullscreen()) return;
+  (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+}
+
+function updateFullscreenButton() {
+  const btn = $("fullBtn");
+  if (!fullscreenSupported) { btn.classList.add("hidden"); return; }
+  btn.classList.remove("hidden");
+  btn.textContent = isFullscreen() ? tr("退出全屏") : tr("全屏");
+}
+$("fullBtn").addEventListener("click", () => (isFullscreen() ? exitFullscreen() : enterFullscreen()));
+document.addEventListener("fullscreenchange", () => { updateFullscreenButton(); setTimeout(fitToWindow, 100); });
+document.addEventListener("webkitfullscreenchange", () => { updateFullscreenButton(); setTimeout(fitToWindow, 100); });
+i18n.onChange(updateFullscreenButton);
+updateFullscreenButton();
+
+// 手机上双击、双指捏合会把页面放大，影响操作：全部拦住
+document.addEventListener("gesturestart", (e) => e.preventDefault());
+document.addEventListener("dblclick", (e) => e.preventDefault());
+let lastTouchEnd = 0;
+document.addEventListener("touchend", (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 350) e.preventDefault();   // 快速连点第二下不当作双击缩放
+  lastTouchEnd = now;
+}, { passive: false });
+document.addEventListener("touchmove", (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
 function buildArena() {
   const h = map.half;
@@ -529,6 +580,7 @@ $("joinForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const name = nameInput.value.trim().slice(0, 12) || tr("匿名玩家");
   try { localStorage.setItem("strike-name", name); } catch (e2) { /* 忽略 */ }
+  enterFullscreen();     // 点击「进入竞技场」是用户操作，这时进入全屏浏览器才允许
   connect(name);
 });
 i18n.onChange(() => { if (playing) updateHint(); });
