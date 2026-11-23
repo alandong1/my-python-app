@@ -24,6 +24,8 @@ class Project:
     icon: str                    # 一个 emoji
     category: str                # 游戏 / 工具 / AI 等
     status: str = "测试中"        # 开发中 / 测试中 / 已上线
+    name_en: str = ""            # 英文名（切换到英文时显示；留空则显示中文名）
+    description_en: str = ""     # 英文简介（同上）
     requires_login: bool = True  # 进入项目是否需要登录（平台账号，含游客）
     router: Optional[APIRouter] = None
     static_dir: Optional[Path] = None             # 挂到 /apps/<slug>/static/
@@ -42,5 +44,6 @@ class Project:
 
     def card(self) -> dict:
         return {"slug": self.slug, "name": self.name, "description": self.description,
+                "nameEn": self.name_en, "descriptionEn": self.description_en,
                 "icon": self.icon, "category": self.category, "status": self.status,
                 "requiresLogin": self.requires_login, "url": self.url}

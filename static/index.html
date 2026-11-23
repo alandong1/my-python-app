@@ -11,14 +11,15 @@
   <header class="top">
     <a href="/" class="logo">🧪 Dev Lab</a>
     <span class="spacer"></span>
-    <button id="loginBtn" class="primary" hidden>登录</button>
+    <button data-lang-toggle class="lang-toggle"></button>
+    <button id="loginBtn" class="primary" hidden data-i18n>登录</button>
     <button id="accountBtn" hidden>👤 <span id="accountName"></span></button>
   </header>
 
   <main>
     <section class="hero">
       <h1>Dev Lab</h1>
-      <p>我的项目实验室：游戏、工具和 AI，都在这里开发和测试。</p>
+      <p data-i18n>我的项目实验室：游戏、工具和 AI，都在这里开发和测试。</p>
     </section>
     <nav id="filters" class="filters"></nav>
     <section id="grid" class="grid" aria-live="polite"></section>
@@ -29,29 +30,29 @@
   <!-- 登录 -->
   <div id="loginModal" class="modal" hidden>
     <div class="box">
-      <button class="close" data-close aria-label="关闭">×</button>
-      <h2>登录 Dev Lab</h2>
-      <p class="muted">一个账号，所有项目通用</p>
-      <button id="guestBtn" class="big primary">🎮 游客进入</button>
-      <small class="muted">游客身份保存在当前浏览器，换设备或清除数据后无法找回</small>
-      <div class="divider"><span>或使用账号</span></div>
+      <button class="close" data-close data-i18n-aria="关闭">×</button>
+      <h2 data-i18n>登录 Dev Lab</h2>
+      <p class="muted" data-i18n>一个账号，所有项目通用</p>
+      <button id="guestBtn" class="big primary" data-i18n>🎮 游客进入</button>
+      <small class="muted" data-i18n>游客身份保存在当前浏览器，换设备或清除数据后无法找回</small>
+      <div class="divider"><span data-i18n>或使用账号</span></div>
       <div class="tabs">
-        <button data-tab="loginForm" class="active">登录</button>
-        <button data-tab="registerForm">注册</button>
+        <button data-tab="loginForm" class="active" data-i18n>登录</button>
+        <button data-tab="registerForm" data-i18n>注册</button>
       </div>
       <form id="loginForm">
-        <input name="username" placeholder="用户名或邮箱" autocomplete="username" required>
-        <input name="password" type="password" placeholder="密码" autocomplete="current-password" required>
-        <button class="big">登录</button>
+        <input name="username" data-i18n-ph="用户名或邮箱" autocomplete="username" required>
+        <input name="password" type="password" data-i18n-ph="密码" autocomplete="current-password" required>
+        <button class="big" data-i18n>登录</button>
       </form>
       <form id="registerForm" hidden>
-        <input name="username" placeholder="用户名（3–20 位，可用中文）" autocomplete="username" required>
-        <input name="password" type="password" placeholder="密码（至少 8 位）" autocomplete="new-password" required>
-        <input name="email" type="email" placeholder="邮箱（可选，用于找回账号）" autocomplete="email">
-        <button class="big">注册</button>
+        <input name="username" data-i18n-ph="用户名（3–20 位，可用中文）" autocomplete="username" required>
+        <input name="password" type="password" data-i18n-ph="密码（至少 8 位）" autocomplete="new-password" required>
+        <input name="email" type="email" data-i18n-ph="邮箱（可选，用于找回账号）" autocomplete="email">
+        <button class="big" data-i18n>注册</button>
       </form>
       <div id="oauthBox" hidden>
-        <div class="divider"><span>第三方登录</span></div>
+        <div class="divider"><span data-i18n>第三方登录</span></div>
         <div id="oauthBtns"></div>
       </div>
       <div id="loginErr" class="err"></div>
@@ -61,14 +62,16 @@
   <!-- 我的账号 -->
   <div id="accountModal" class="modal" hidden>
     <div class="box left">
-      <button class="close" data-close aria-label="关闭">×</button>
-      <h2>👤 我的账号</h2>
+      <button class="close" data-close data-i18n-aria="关闭">×</button>
+      <h2 data-i18n>👤 我的账号</h2>
       <div id="accountBody"></div>
-      <button id="logoutBtn">退出登录</button>
+      <button id="logoutBtn" data-i18n>退出登录</button>
     </div>
   </div>
 
   <div id="toast"></div>
+  <script src="/static/i18n.js"></script>
+  <script src="/static/lang.js"></script>
   <script src="/static/store.js"></script>
 </body>
 </html>

@@ -20,6 +20,9 @@ const TERRAIN_COLOR = {
 const TERRAIN_DECOR = { forest: "🌲", mountain: "⛰️", gold: "✨", hills: "" };
 const $ = (id) => document.getElementById(id);
 const key = (x, y) => x + "," + y;
+// 翻译函数（译文在 static/lang.js；切换语言见 static/i18n.js）。
+// 不叫 t，因为 tilePanelHTML 里有个局部变量 t 表示地块
+const tr = (zh, ...args) => i18n.t(zh, ...args);
 
 // ============================================================ 网络
 // 登录状态保存在服务器设置的 HttpOnly cookie 里，WebSocket 连接时浏览器会自动带上
@@ -56,7 +59,7 @@ function handle(m) {
   } else if (m.type === "state") {
     onState(m);
   } else if (m.type === "error") {
-    toast(m.text);
+    toast(tr(m.text));
   } else if (m.type === "auth") {
     // 登录已过期
     S.account = null; S.ws = null;
@@ -338,7 +341,9 @@ function setMoveMode(m) {
   canvas.style.cursor = m ? "crosshair" : "";
   const h = $("hint");
   h.style.display = m ? "block" : "none";
-  h.textContent = m ? `点击目标格子进军（${m.fraction < 1 ? "派出一半" : "全军"}），Esc 取消` : "";
+  h.textContent = m
+    ? (m.fraction < 1 ? tr("点击目标：派出一半的部队进军（Esc 取消）") : tr("点击目标：全军进军（Esc 取消）"))
+    : "";
 }
 
 // ============================================================ 渲染：面板
@@ -353,7 +358,7 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 function unitsText(units) {
-  return Object.entries(units).map(([u, n]) => `${S.info.units[u].icon}${S.info.units[u].name}×${n}`).join(" ");
+  return Object.entries(units).map(([u, n]) => `${S.info.units[u].icon}${tr(S.info.units[u].name)}×${n}`).join(" ");
 }
 function btn(label, action, data, enabled = true, cls = "") {
   const attrs = Object.entries(data).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
@@ -382,54 +387,54 @@ function renderSide(force = false) {
 }
 
 function tilePanelHTML() {
-  if (!S.sel) return `<p class="muted">点击地图上的格子查看详情</p>`;
+  if (!S.sel) return `<p class="muted">${tr("点击地图上的格子查看详情")}</p>`;
   const { x, y } = S.sel, k = key(x, y), t = S.known.get(k), vis = S.visible.has(k);
-  if (!t) return `<h3>(${x}, ${y})</h3><p class="muted">未探索区域。派部队过去看看吧。</p>`;
+  if (!t) return `<h3>(${x}, ${y})</h3><p class="muted">${tr("未探索区域。派部队过去看看吧。")}</p>`;
   const I = S.info;
-  let h = `<h3>(${x}, ${y}) ${I.terrainNames[t.t]}${vis ? "" : " <small>· 迷雾中（旧情报）</small>"}</h3>`;
+  let h = `<h3>(${x}, ${y}) ${tr(I.terrainNames[t.t])}${vis ? "" : ` <small>${tr("· 迷雾中（旧情报）")}</small>`}</h3>`;
   const owner = t.owner ? S.players[t.owner] : null;
-  if (owner) h += `<div class="row"><span class="swatch" style="background:${owner.color}"></span>领主：${esc(owner.name)}${t.owner === S.myId ? "（你）" : ""}</div>`;
-  else h += `<div class="row muted">无主之地</div>`;
-  if (t.t === "hills") h += `<div class="muted">丘陵：防守方战力 ×1.25</div>`;
-  if (t.t === "forest") h += `<div class="muted">森林：防守方战力 ×1.1</div>`;
+  if (owner) h += `<div class="row"><span class="swatch" style="background:${owner.color}"></span>${tr("领主：{0}", esc(owner.name))}${t.owner === S.myId ? tr("（你）") : ""}</div>`;
+  else h += `<div class="row muted">${tr("无主之地")}</div>`;
+  if (t.t === "hills") h += `<div class="muted">${tr("丘陵：防守方战力 ×1.25")}</div>`;
+  if (t.t === "forest") h += `<div class="muted">${tr("森林：防守方战力 ×1.1")}</div>`;
 
   // 野怪
   if (t.npc && vis) {
     const [type, pw, max] = t.npc, n = I.npcs[type];
-    h += `<div class="card"><b>${n.icon} ${n.name}</b> 战力 ${pw}/${max}
+    h += `<div class="card"><b>${n.icon} ${tr(n.name)}</b> ${tr("战力")} ${pw}/${max}
       <div class="bar"><i style="width:${100 * pw / max}%"></i></div>
-      <div class="cost">击败奖励：${costText(n.reward)}</div>
-      <div class="muted">选中你的部队后右键这里进攻</div></div>`;
+      <div class="cost">${tr("击败奖励：")}${costText(n.reward)}</div>
+      <div class="muted">${tr("选中你的部队后右键这里进攻")}</div></div>`;
   }
   // 建筑
   const mine = t.owner === S.myId && S.me.alive;
   if (t.b) {
     const b = I.buildings[t.b];
-    h += `<div class="card"><b>${b.icon} ${b.name}</b> Lv${t.lv}<div class="muted">${b.desc}</div>`;
+    h += `<div class="card"><b>${b.icon} ${tr(b.name)}</b> Lv${t.lv}<div class="muted">${tr(b.desc)}</div>`;
     if (mine) {
       if (t.lv < I.maxLevel) {
         const c = b.cost, m = t.lv + 1;
-        h += `<div class="row">${btn("升级", "upgrade", { x, y }, affordable(c, m), "primary")}<span class="cost">${costText(c, m)}</span>`;
-      } else h += `<div class="row"><span class="muted">已满级</span>`;
-      if (t.b !== "hq") h += `<span class="grow"></span>${btn("拆除", "demolish", { x, y })}`;
+        h += `<div class="row">${btn(tr("升级"), "upgrade", { x, y }, affordable(c, m), "primary")}<span class="cost">${costText(c, m)}</span>`;
+      } else h += `<div class="row"><span class="muted">${tr("已满级")}</span>`;
+      if (t.b !== "hq") h += `<span class="grow"></span>${btn(tr("拆除"), "demolish", { x, y })}`;
       h += `</div>`;
     }
     h += `</div>`;
   } else if (mine) {
     const opts = Object.entries(I.buildings).filter(([, b]) => b.buildable && (!b.terrain || b.terrain.includes(t.t)));
     if (opts.length) {
-      h += `<div class="muted" style="margin-top:6px">可建造：</div>`;
+      h += `<div class="muted" style="margin-top:6px">${tr("可建造：")}</div>`;
       for (const [id, b] of opts) {
-        h += `<div class="card"><div class="row"><b>${b.icon} ${b.name}</b><span class="grow"></span>
-          ${btn("建造", "build", { x, y, building: id }, affordable(b.cost), "primary")}</div>
-          <div class="cost">${costText(b.cost)}</div><div class="muted" style="font-size:12px">${b.desc}</div></div>`;
+        h += `<div class="card"><div class="row"><b>${b.icon} ${tr(b.name)}</b><span class="grow"></span>
+          ${btn(tr("建造"), "build", { x, y, building: id }, affordable(b.cost), "primary")}</div>
+          <div class="cost">${costText(b.cost)}</div><div class="muted" style="font-size:12px">${tr(b.desc)}</div></div>`;
       }
-    } else h += `<div class="muted">这种地形上没有可建造的建筑。</div>`;
+    } else h += `<div class="muted">${tr("这种地形上没有可建造的建筑。")}</div>`;
   }
   // 拓展
   if (expandable().has(k)) {
     const c = { gold: S.me.expandCost };
-    h += `<div class="row" style="margin-top:8px">${btn("🚩 拓展领地", "expand", { x, y }, affordable(c), "primary")}<span class="cost">${costText(c)}</span></div>`;
+    h += `<div class="row" style="margin-top:8px">${btn("🚩 " + tr("拓展领地"), "expand", { x, y }, affordable(c), "primary")}<span class="cost">${costText(c)}</span></div>`;
   }
   // 部队
   const armies = vis ? S.armies.filter((a) => a.x === x && a.y === y) : [];
@@ -438,14 +443,14 @@ function tilePanelHTML() {
     if (a.owner === S.myId) {
       const moving = a.path && a.path.length;
       h += `<div class="card" style="${a.id === S.selArmy ? "outline:1px solid #fff" : ""}">
-        <div class="row"><b>🛡️ 你的部队</b><span class="grow"></span>战力 ${a.power}</div>
+        <div class="row"><b>🛡️ ${tr("你的部队")}</b><span class="grow"></span>${tr("战力 {0}", a.power)}</div>
         <div style="font-size:13px">${unitsText(a.units)}</div>
-        <div class="row">${btn("全军出发", "go", { army: a.id, f: 1 }, true, "primary")}
-          ${btn("派出一半", "go", { army: a.id, f: 0.5 }, a.size > 1)}
-          ${moving ? btn("停止", "stop", { army: a.id }) : ""}</div></div>`;
+        <div class="row">${btn(tr("全军出发"), "go", { army: a.id, f: 1 }, true, "primary")}
+          ${btn(tr("派出一半"), "go", { army: a.id, f: 0.5 }, a.size > 1)}
+          ${moving ? btn(tr("停止"), "stop", { army: a.id }) : ""}</div></div>`;
     } else {
-      h += `<div class="card"><b style="color:${p ? p.color : "#ccc"}">⚔️ ${esc(p ? p.name : "?")} 的部队</b>
-        <div>人数 ${a.size} · 战力 ${a.power}</div></div>`;
+      h += `<div class="card"><b style="color:${p ? p.color : "#ccc"}">⚔️ ${tr("{0} 的部队", esc(p ? p.name : "?"))}</b>
+        <div>${tr("人数 {0} · 战力 {1}", a.size, a.power)}</div></div>`;
     }
   }
   return h;
@@ -453,32 +458,32 @@ function tilePanelHTML() {
 
 function renderTrain() {
   const I = S.info, lv = S.me.barracks;
-  $("barracksLv").textContent = lv ? `Lv${lv}` : "（未建造）";
+  $("barracksLv").textContent = lv ? `Lv${lv}` : tr("（未建造）");
   let h = "";
   for (const [id, u] of Object.entries(I.units)) {
     const ok = lv >= u.barracks;
-    h += `<div class="card"><div class="row"><b>${u.icon} ${u.name}</b>
-      <small>战力 ${S.me.unitPower[id]}${u.speed === 1 ? " · 快速" : u.speed >= 4 ? " · 缓慢" : ""}${u.siege ? " · 攻城×" + u.siege : ""}</small></div>`;
+    h += `<div class="card"><div class="row"><b>${u.icon} ${tr(u.name)}</b>
+      <small>${tr("战力 {0}", S.me.unitPower[id])}${u.speed === 1 ? " · " + tr("快速") : u.speed >= 4 ? " · " + tr("缓慢") : ""}${u.siege ? " · " + tr("攻城") + "×" + u.siege : ""}</small></div>`;
     if (ok) {
       h += `<div class="row"><span class="cost grow">${costText(u.cost)}</span>
         ${[1, 5, 10].map((n) => btn("×" + n, "train", { unit: id, count: n }, affordable(u.cost, n))).join("")}</div>`;
-    } else h += `<div class="muted">需要 ${u.barracks} 级兵营</div>`;
+    } else h += `<div class="muted">${tr("需要 {0} 级兵营", u.barracks)}</div>`;
     h += `</div>`;
   }
   setHTML("trainPanel", h);
-  const q = S.me.queue.map((j) => `${I.units[j.unit].icon}${I.units[j.unit].name}×${j.count}`).join(" → ");
-  $("queue").textContent = q ? "训练中：" + q : "";
+  const q = S.me.queue.map((j) => `${I.units[j.unit].icon}${tr(I.units[j.unit].name)}×${j.count}`).join(" → ");
+  $("queue").textContent = q ? tr("训练中：") + q : "";
 }
 
 function renderResearch() {
   const I = S.info, lv = S.me.smithy;
-  $("smithyLv").textContent = lv ? `Lv${lv}` : "（未建造）";
+  $("smithyLv").textContent = lv ? `Lv${lv}` : tr("（未建造）");
   let h = "";
   for (const [id, r] of Object.entries(I.research)) {
     const cur = S.me.research[id], m = cur + 1;
-    h += `<div class="card"><div class="row"><b>${r.name}</b> Lv${cur}<span class="grow"></span>
-      ${btn("研究", "research", { kind: id }, cur < lv && affordable(r.cost, m))}</div>
-      <div class="cost">${r.desc} · ${costText(r.cost, m)}${cur >= lv ? " · 需升级铁匠铺" : ""}</div></div>`;
+    h += `<div class="card"><div class="row"><b>${tr(r.name)}</b> Lv${cur}<span class="grow"></span>
+      ${btn(tr("研究"), "research", { kind: id }, cur < lv && affordable(r.cost, m))}</div>
+      <div class="cost">${tr(r.desc)} · ${costText(r.cost, m)}${cur >= lv ? " · " + tr("需升级铁匠铺") : ""}</div></div>`;
   }
   setHTML("researchPanel", h);
 }
@@ -486,7 +491,7 @@ function renderResearch() {
 function renderBoard() {
   const h = S.board.map((p, i) => `<div class="row"><span>${i + 1}.</span>
     <span class="swatch" style="background:${p.color}"></span>
-    <span class="grow">${esc(p.name)}${p.id === S.myId ? "（你）" : ""}${p.alive ? "" : " 💀"}${p.online ? "" : " <small>离线</small>"}</span>
+    <span class="grow">${esc(p.name)}${p.id === S.myId ? tr("（你）") : ""}${p.alive ? "" : " 💀"}${p.online ? "" : " <small>" + tr("离线") + "</small>"}</span>
     <small>🗺️${p.tiles} 🛡️${p.army}</small></div>`).join("");
   setHTML("board", h);
 }
@@ -521,13 +526,21 @@ $("side").addEventListener("click", (e) => {
   else if (a === "train") send("train", { unit: d.unit, count: +d.count });
   else if (a === "research") send("research", { kind: d.kind });
   else if (a === "build") send("build", { x: +d.x, y: +d.y, building: d.building });
-  else if (a === "demolish") { if (confirm("确定拆除这个建筑？")) send("demolish", { x: +d.x, y: +d.y }); }
+  else if (a === "demolish") { if (confirm(tr("确定拆除这个建筑？"))) send("demolish", { x: +d.x, y: +d.y }); }
   else send(a, { x: +d.x, y: +d.y });
 });
 
 // ============================================================ 启动
 $("homeBtn").onclick = () => S.me && S.me.hq && centerOn(...S.me.hq);
 $("respawnBtn").onclick = () => send("respawn");
+
+// 切换语言：面板是用 JS 生成的，需要按新语言重画一遍
+i18n.onChange(() => {
+  if (S.me && S.info) {
+    renderTop(); renderSide(true);
+    if (S.moveMode) setMoveMode(S.moveMode);
+  }
+});
 
 // ============================================================ 登录检查
 // 登录在 Dev Lab 首页完成。这里只检查是否已登录，没有就跳到首页登录，登录后再回来
@@ -538,7 +551,7 @@ function goLogin() {
 async function boot() {
   const r = await fetch("/api/auth/me");
   if (r.status === 401) return goLogin();
-  if (!r.ok) { toast("服务器暂时无法访问，请稍后刷新"); return; }
+  if (!r.ok) { toast(tr("服务器暂时无法访问，请稍后刷新")); return; }
   const account = await r.json();
   S.account = account;
   $("accountName").textContent = account.displayName;
