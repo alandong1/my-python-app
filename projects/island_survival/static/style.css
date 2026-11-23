@@ -20,8 +20,14 @@
 }
 
 * { box-sizing: border-box; }
+/* 手机上禁止双击放大、捏合缩放，操作时页面不会乱动 */
+html, body, #game, button, #joy {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
 html, body {
-  margin: 0; height: 100%; overflow: hidden;
+  margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none;
   background: #9fd3ec; color: var(--ink);
   font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -70,8 +76,12 @@ button:disabled { opacity: 0.5; cursor: default; }
 #inv li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0;
   border-bottom: 1px solid var(--bar-bg); }
 #inv li button { padding: 3px 8px; font-size: 12px; }
-#log { left: 12px; bottom: 170px; width: 300px; max-height: 160px; overflow: hidden; font-size: 13px; }
-#log p { margin: 2px 0; }
+/* 互动日志：小、半透明，不挡视线；只保留最近几行，越旧越淡 */
+#log { left: 12px; bottom: 170px; width: 240px; max-height: 88px; overflow: hidden; font-size: 12px;
+  padding: 4px 8px; background: rgba(0, 0, 0, 0.22); color: #fff; text-shadow: 0 1px 2px #000;
+  box-shadow: none; pointer-events: none; }
+#log p { margin: 1px 0; opacity: 0.95; }
+#log p:not(:last-child) { opacity: 0.5; }
 #toast { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: var(--warn);
   color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 14px; max-width: 90%; }
 
@@ -96,7 +106,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   .roles { grid-template-columns: 1fr; }
   #hud-left { width: 180px; font-size: 12px; }
   #hud-right { width: 150px; top: auto; bottom: 12px; right: 12px; max-height: 35%; }
-  #log { width: 52%; bottom: auto; top: 170px; max-height: 110px; left: 12px; }
+  #log { width: 52%; bottom: auto; top: 170px; max-height: 72px; left: 12px; }
   #actions { right: 12px; bottom: 150px; max-width: 80%; }
   #joy { width: 100px; height: 100px; left: 12px; bottom: 12px; }
   #knob { left: 25px; top: 25px; width: 50px; height: 50px; }
