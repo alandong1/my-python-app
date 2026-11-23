@@ -29,18 +29,21 @@ jobs:
   count-failures:
     if: >-
       github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.pull_requests[0] != null
+      (github.event.workflow_run.event == 'pull_request' ||
+       github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
-      PR: ${{ github.event.workflow_run.pull_requests[0].number }}
       BRANCH: ${{ github.event.workflow_run.head_branch }}
     steps:
       - name: Count CI failures on this PR
         run: |
           set -euo pipefail
+          # 找到这个分支对应的 PR（sync-prs.yml 触发的 CI 不带 PR 信息，所以按分支找）
+          PR=$(gh pr list --head "$BRANCH" --state open --json number,isCrossRepository \
+            -q '[.[] | select(.isCrossRepository | not)][0].number // empty')
+          if [ -z "$PR" ]; then echo "分支 $BRANCH 没有打开的 PR，不计数"; exit 0; fi
           labels=$(gh pr view "$PR" --json labels -q '[.labels[].name] | join(",")')
           if [[ ",$labels," == *",$LABEL,"* ]]; then
             echo "PR #$PR 已经是 $LABEL 状态，不重复处理。"
@@ -53,9 +56,10 @@ jobs:
             -q "[.[] | select(.event == \"unlabeled\" and .label.name == \"$LABEL\") | .created_at] | last // empty" | tail -n 1)
           if [ -n "$reset" ]; then since="$reset"; fi
 
-          fails=$(gh run list --workflow ci.yml --branch "$BRANCH" --event pull_request \
-            --status failure --limit 100 --json createdAt \
-            -q "[.[] | select(.createdAt >= \"$since\")] | length")
+          fails=$(gh run list --workflow ci.yml --branch "$BRANCH" \
+            --status failure --limit 100 --json createdAt,event \
+            -q "[.[] | select((.event == \"pull_request\" or .event == \"workflow_dispatch\")
+                              and .createdAt >= \"$since\")] | length")
           echo "PR #$PR 从 $since 起 CI 失败 $fails 次（上限 $MAX_FAILURES）"
 
           if [ "$fails" -ge "$MAX_FAILURES" ]; then
