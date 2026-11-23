@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>荒岛求生 · Dev Lab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝️</text></svg>">
+  <link rel="stylesheet" href="static/style.css">
+  <!-- Three.js r160（3D 库）放在本站 static/vendor/ 下，不依赖外部 CDN -->
+  <script type="importmap">
+    {"imports": {"three": "./static/vendor/three.module.min.js"}}
+  </script>
+</head>
+<body>
+
+  <!-- 第一步：选角色 -->
+  <section id="pick" class="screen">
+    <div class="panel">
+      <h1>🏝️ 荒岛求生</h1>
+      <p class="lead">一场海难把你冲到了一座无人荒岛上。选一个角色，和岛上的其他幸存者一起活下去。</p>
+      <div class="roles">
+        <button class="role" data-role="chef">
+          <span class="emoji">🧑‍🍳</span>
+          <b>厨师</b>
+          <small>做饭时自己额外吃饱 15 点。</small>
+        </button>
+        <button class="role" data-role="doctor">
+          <span class="emoji">🩺</span>
+          <b>医生</b>
+          <small>把草本植物制成草药，治疗队友和疾病。</small>
+        </button>
+        <button class="role" data-role="priest">
+          <span class="emoji">⛪</span>
+          <b>牧师</b>
+          <small>精神下降得慢，还能给身边的队友恢复精神。</small>
+        </button>
+      </div>
+      <p id="pickMsg" class="msg"></p>
+      <p class="hint">你会随机落在岛上的某个地方。</p>
+    </div>
+  </section>
+
+  <!-- 第二步：游戏画面 -->
+  <section id="game" hidden>
+    <canvas id="scene"></canvas>
+
+    <div id="hud-left" class="card">
+      <div class="who"><span id="roleName"></span> · <span id="meName"></span>
+        <span id="sickBadge" class="badge" hidden>生病了</span></div>
+      <div class="bar"><span>🍖 饱食</span><div><i id="barHunger"></i></div><b id="valHunger"></b></div>
+      <div class="bar"><span>❤️ 健康</span><div><i id="barHealth"></i></div><b id="valHealth"></b></div>
+      <div class="bar"><span>🧠 精神</span><div><i id="barSanity"></i></div><b id="valSanity"></b></div>
+      <div id="survivors" class="small"></div>
+    </div>
+
+    <div id="hud-right" class="card">
+      <div class="title">背包</div>
+      <ul id="inv"></ul>
+    </div>
+
+    <div id="log" class="card"></div>
+    <div id="toast" hidden></div>
+
+    <div id="actions">
+      <button data-action="interact" title="E">互动 E</button>
+      <button data-action="build_fire" title="B">生火 B</button>
+      <button data-action="cook" title="C">做饭 C</button>
+      <button data-action="craft" title="X" class="doctor-only">制药 X</button>
+      <button data-action="heal" title="H" class="doctor-only">治疗 H</button>
+    </div>
+
+    <div id="joy"><div id="knob"></div></div>
+    <div id="keys" class="small">WASD 移动 · 拖动鼠标转视角 · E 互动</div>
+
+    <div id="dead" hidden>
+      <div class="panel">
+        <h2>💀 你倒下了</h2>
+        <p>岛上的风还在吹。点下面的按钮，在岛上另一个地方重新开始。</p>
+        <button id="respawnBtn">重新开始</button>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="static/game.js"></script>
+</body>
+</html>
