@@ -60,6 +60,27 @@ else
   WANT="$(git rev-parse --short=7 origin/main)"
 fi
 
+# 上线后打印可以直接点开的链接，agent 把它们原样贴给负责人（见 AGENTS.md 开发流程第 5 步）
+print_links() {
+  echo
+  echo "🔗 链接："
+  # 这次合并改动了哪些项目：合并提交和它的第一个父提交（合并前的 main）相比
+  local projects
+  projects=$(git diff --name-only "${WANT}^1" "$WANT" 2>/dev/null \
+    | sed -n 's#^projects/\([a-z][a-z0-9_]*\)/.*#\1#p' | sort -u)
+  for dir in $projects; do
+    [ -d "projects/$dir" ] || continue
+    echo "  - 项目页面：${URL}/apps/${dir//_/-}/"
+  done
+  echo "  - 网站首页：${URL}/"
+  local repo pr
+  repo=$(git remote get-url origin | sed -n 's#.*github\.com[:/]\([^/]*/[^/.]*\).*#\1#p')
+  pr=$(git log -1 --format=%s "$WANT" | sed -n 's/^Merge pull request #\([0-9]*\).*/\1/p')
+  if [ -n "$repo" ] && [ -n "$pr" ]; then
+    echo "  - PR：https://github.com/${repo}/pull/${pr}"
+  fi
+}
+
 echo "等待 ${WANT} 部署到 ${URL}（最长 ${TIMEOUT}s）..."
 last=""
 while true; do
@@ -71,6 +92,7 @@ while true; do
     health=$(curl -s -m 15 "$URL/health" || true)
     echo "health: $health"
     case "$body" in *'"db":"postgresql"'*) ;; *) echo "⚠️ 线上没有使用 PostgreSQL，请检查 DATABASE_URL" ;; esac
+    print_links
     exit 0
   fi
   if [ "$live" != "$last" ]; then
