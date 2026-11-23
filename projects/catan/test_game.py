@@ -10,9 +10,11 @@ from projects.catan.game import Game, GameError
 class FakeRng(random.Random):
     """骰子结果由测试指定，其它随机（洗牌、抢牌）照常。"""
 
-    def __init__(self, dice=()):
+    def __init__(self):
+        # 注意：不能把骰子列表作为构造参数传进来。Python 3.9 的 random.Random 会对构造参数做 hash，
+        # 列表不可哈希会报错；所以骰子结果在创建之后再设置。
         super().__init__(123)
-        self.dice = list(dice)
+        self.dice = []
 
     def randint(self, a, b):
         if self.dice:
@@ -22,7 +24,9 @@ class FakeRng(random.Random):
 
 def new_game(n=3, seed=5, dice=()):
     names = [(100 + i, f"玩家{i}") for i in range(n)]
-    return Game(names, rng=FakeRng(dice))
+    rng = FakeRng()
+    rng.dice = list(dice)
+    return Game(names, rng=rng)
 
 
 def uid_of(g, seat):
