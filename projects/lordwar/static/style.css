@@ -22,39 +22,15 @@ h3 { margin: 0 0 8px; font-size: 14px; color: var(--accent); }
 small, .muted { color: var(--muted); }
 [hidden] { display: none !important; }
 
-#login { position: fixed; inset: 0; display: grid; place-items: center;
-  background: radial-gradient(circle at 50% 30%, #2a2f3a, var(--bg)); }
-.login-box { background: var(--panel); padding: 32px; border-radius: 12px; width: min(360px, calc(100% - 32px));
-  display: flex; flex-direction: column; gap: 12px; text-align: center; border: 1px solid var(--line); }
-.login-box h1 { margin: 0; }
-.login-box p { margin: 0; color: var(--muted); }
-.login-box input { padding: 10px; font-size: 16px; border-radius: 6px; border: 1px solid var(--line);
-  background: var(--bg); color: var(--text); }
-.login-box form { display: flex; flex-direction: column; gap: 10px; }
-.login-box form.row { flex-direction: row; flex-wrap: nowrap; }
-.login-box small { font-size: 12px; }
-button.big { padding: 10px; font-size: 16px; }
-.divider { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
-.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
-.tabs { display: flex; gap: 6px; }
-.tabs button { flex: 1; }
-.tabs button.active { border-color: var(--accent); color: var(--accent); }
-#oauthBtns { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-#oauthBtns a { display: block; padding: 9px; border-radius: 6px; border: 1px solid var(--line);
-  background: var(--panel2); color: var(--text); text-decoration: none; }
-#oauthBtns a:hover { border-color: var(--accent); }
-.err { color: var(--bad); min-height: 1.2em; font-size: 13px; }
-.modal { position: fixed; inset: 0; display: grid; place-items: center; background: #000a; z-index: 10; }
-.modal .login-box { text-align: left; }
-.modal .row input { flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
-  background: var(--bg); color: var(--text); min-width: 0; }
-.badge { font-size: 12px; padding: 1px 6px; border-radius: 10px; background: var(--panel2); color: var(--muted); }
-.badge.ok { color: var(--good); }
 
 #game { display: flex; flex-direction: column; height: 100vh; }
 #topbar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: var(--panel);
   border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 #topbar .res b { font-size: 16px; }
+#topbar .home { font-size: 20px; text-decoration: none; }
+a.btn { color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 10px; text-decoration: none; }
+a.btn:hover { border-color: var(--accent); }
 #topbar small { font-size: 12px; }
 .spacer { flex: 1; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); }

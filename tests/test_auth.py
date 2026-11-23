@@ -76,14 +76,14 @@ def test_email_verification_flow(client, sent_emails):
 
 
 def test_websocket_requires_login_and_keeps_kingdom(client):
-    with client.websocket_connect("/ws") as ws:
+    with client.websocket_connect("/apps/lordwar/ws") as ws:
         assert ws.receive_json()["type"] == "auth"
     register(client, "ws_user")
-    with client.websocket_connect("/ws") as ws:
+    with client.websocket_connect("/apps/lordwar/ws") as ws:
         ws.send_json({"type": "join"})
         first = ws.receive_json()
         assert first["type"] == "welcome" and first["name"] == "ws_user"
-    with client.websocket_connect("/ws") as ws:
+    with client.websocket_connect("/apps/lordwar/ws") as ws:
         ws.send_json({"type": "join"})
         assert ws.receive_json()["id"] == first["id"]
 
@@ -92,14 +92,14 @@ def test_websocket_rejects_other_sites(client):
     register(client, "origin_user")
     accepted = False
     try:
-        with client.websocket_connect("/ws", headers={"origin": "https://evil.example"}) as ws:
+        with client.websocket_connect("/apps/lordwar/ws", headers={"origin": "https://evil.example"}) as ws:
             ws.send_json({"type": "join"})
             accepted = ws.receive_json().get("type") == "welcome"
     except Exception:
         pass  # 连接被服务器拒绝，符合预期
     assert not accepted, "跨站 WebSocket 连接应被拒绝"
     # 同站连接正常
-    with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+    with client.websocket_connect("/apps/lordwar/ws", headers={"origin": "http://testserver"}) as ws:
         ws.send_json({"type": "join"})
         assert ws.receive_json()["type"] == "welcome"
 
@@ -109,9 +109,6 @@ def test_login_rate_limit(client):
     assert 429 in codes
 
 
-def test_version_and_index(client):
+def test_version(client):
     v = client.get("/version").json()
     assert v["db"] == "sqlite" and v["commit"]
-    r = client.get("/")
-    assert r.headers["cache-control"] == "no-cache"
-    assert f"/static/game.js?v={v['commit']}" in r.text

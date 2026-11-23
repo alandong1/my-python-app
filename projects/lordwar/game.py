@@ -1,6 +1,6 @@
 """游戏世界：地图生成、玩家、建筑、部队、战斗、野怪、战争迷雾。
 
-所有状态都在内存里，由 main.py 里的循环每 TICK_SECONDS 调用一次 tick()。
+所有状态都在内存里，由 server.py 里的循环每 TICK_SECONDS 调用一次 tick()；存档见 to_dict / from_dict。
 """
 from __future__ import annotations
 

@@ -157,3 +157,15 @@ def test_apple_login_verifies_tokens(client, monkeypatch):
     r = client.post("/api/auth/oauth/apple/callback", data={"code": "ac", "state": state},
                     follow_redirects=False)
     assert "error=" in r.headers["location"]
+
+
+def test_oauth_returns_to_next_page(client, google):
+    r = client.get("/api/auth/oauth/google/start?next=/apps/lordwar/", follow_redirects=False)
+    r = client.get(f"/api/auth/oauth/google/callback?code=goodcode&state={state_of(r.headers['location'])}",
+                   follow_redirects=False)
+    assert r.headers["location"] == "/apps/lordwar/"
+    client.post("/api/auth/logout")
+    r = client.get("/api/auth/oauth/google/start?next=//evil.com", follow_redirects=False)
+    r = client.get(f"/api/auth/oauth/google/callback?code=goodcode&state={state_of(r.headers['location'])}",
+                   follow_redirects=False)
+    assert r.headers["location"] == "/"

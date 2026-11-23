@@ -1,7 +1,7 @@
 """游戏逻辑测试：不经过网络，直接调用 Game。"""
 import pytest
 
-from app.game import Game, GameError
+from projects.lordwar.game import Game, GameError
 
 
 def rich(game, p):
@@ -101,7 +101,7 @@ def test_view_hides_fog():
 
 def test_maps_always_have_room_and_reachable_center():
     """回归测试：曾经中央被湖泊包围时，整张地图几乎都变成了高山，玩家无法出生（seed 7）。"""
-    from app import config as C
+    from projects.lordwar import config as C
     for seed in list(range(40)) + [7]:
         g = Game(seed)
         walkable = sum(1 for row in g.tiles for t in row if t.terrain not in C.IMPASSABLE)

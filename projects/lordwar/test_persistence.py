@@ -4,8 +4,9 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main
-from app.game import Game, GameError
+from app.main import app
+from projects.lordwar import server
+from projects.lordwar.game import Game, GameError
 from app.persistence import KEEP_SNAPSHOTS, dump_world, load_latest, save_snapshot
 
 
@@ -88,26 +89,26 @@ def test_snapshot_db_keeps_latest_only():
 
 
 def join(c):
-    with c.websocket_connect("/ws") as ws:
+    with c.websocket_connect("/apps/lordwar/ws") as ws:
         ws.send_json({"type": "join"})
         return ws.receive_json()
 
 
 def test_kingdom_survives_restart():
     # 第一次启动：注册、进入游戏、拓展领地
-    with TestClient(main.app) as c:
+    with TestClient(app) as c:
         c.post("/api/auth/register", json={"username": "restart_user", "password": "secret123"})
         first = join(c)
-        p = main.game.players[first["id"]]
+        p = server.game.players[first["id"]]
         p.res["gold"] = 9999.0
         before_tiles = set(p.tiles)
-        before_game = main.game
+        before_game = server.game
     # 退出 with 时服务器关闭并存档。第二次启动：读档
-    with TestClient(main.app) as c:
-        assert main.game is not before_game                 # 确实是从存档重建的
+    with TestClient(app) as c:
+        assert server.game is not before_game                 # 确实是从存档重建的
         c.post("/api/auth/login", json={"username": "restart_user", "password": "secret123"})
         second = join(c)
-        p2 = main.game.players[second["id"]]
+        p2 = server.game.players[second["id"]]
         assert second["id"] == first["id"]
         assert p2.tiles == before_tiles
         assert p2.res["gold"] >= 9999.0

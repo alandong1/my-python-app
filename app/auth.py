@@ -15,10 +15,10 @@ import time
 from collections import defaultdict, deque
 from datetime import timedelta
 from typing import Deque, Dict, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import bcrypt
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response, WebSocket
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -136,6 +136,21 @@ def lookup_session_user(token: Optional[str]):
     with get_db() as db:
         u = user_from_token(db, token)
         return (u.id, u.display_name) if u else None
+
+
+def ws_same_origin(ws: WebSocket) -> bool:
+    """拒绝其他网站发起的 WebSocket 连接（防止别的网站借用玩家的登录状态）。"""
+    origin = ws.headers.get("origin")
+    if not origin:
+        return True  # 非浏览器客户端
+    return urlsplit(origin).netloc == ws.headers.get("host")
+
+
+def safe_next(path: Optional[str]) -> str:
+    """登录后要回到的页面。只允许本站的相对路径，防止被利用跳转到别的网站。"""
+    if path and path.startswith("/") and not path.startswith("//") and "\\" not in path:
+        return path
+    return "/"
 
 
 def require_user(db, request: Request) -> User:
@@ -324,7 +339,7 @@ def _state_cookie_samesite() -> str:
 
 
 @router.get("/oauth/{provider}/start")
-def oauth_start(provider: str, request: Request, link: int = 0):
+def oauth_start(provider: str, request: Request, link: int = 0, next: str = "/"):
     p = PROVIDERS.get(provider)
     if not p or not p.enabled():
         raise HTTPException(404, "未启用该登录方式")
@@ -337,7 +352,7 @@ def oauth_start(provider: str, request: Request, link: int = 0):
             link_user_id = require_user(db, request).id
     state = secrets.token_urlsafe(24)
     _pending[state] = {"provider": provider, "link_user_id": link_user_id,
-                       "expires": now + OAUTH_STATE_TTL}
+                       "next": safe_next(next), "expires": now + OAUTH_STATE_TTL}
     resp = RedirectResponse(p.authorize_url(state), status_code=302)
     _set_cookie(resp, STATE_COOKIE, state, OAUTH_STATE_TTL,
                 samesite=_state_cookie_samesite(), path="/api/auth/oauth")
@@ -402,7 +417,7 @@ def _finish_oauth(provider: str, params: Dict[str, str], cookie_state: Optional[
             db.flush()
             db.add(OAuthAccount(user_id=u.id, provider=provider,
                                 provider_user_id=ident.provider_user_id, email=ident.email))
-        resp = RedirectResponse("/", status_code=303)
+        resp = RedirectResponse(pending["next"], status_code=303)
         start_session(db, u, resp)
         return _oauth_done(resp)
 
