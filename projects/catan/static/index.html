@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>卡坦岛 · Dev Lab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝️</text></svg>">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <a href="/" class="home" title="返回 Dev Lab">🏠</a>
+    <b class="title">🏝️ 卡坦岛</b>
+    <span id="roomTag" class="tag" hidden></span>
+    <span class="spacer"></span>
+    <a id="accountBtn" class="btn" href="/?account=1">👤 <span id="accountName"></span></a>
+    <span id="conn" class="dot" title="连接状态"></span>
+  </header>
+
+  <!-- 大厅：创建 / 加入房间 -->
+  <section id="lobby" hidden>
+    <div class="card intro">
+      <h2>欢迎来到卡坦岛</h2>
+      <p class="muted">3–4 人联机，规则同卡坦岛基础版：抢占土地、交易资源、修路建城，先拿到 10 分者获胜。</p>
+      <div class="row">
+        <button id="createBtn" class="primary">➕ 创建房间</button>
+      </div>
+      <div class="row">
+        <input id="codeInput" maxlength="5" placeholder="房间代码" autocomplete="off" aria-label="房间代码">
+        <button id="joinBtn">🚪 加入房间</button>
+      </div>
+    </div>
+
+    <div id="roomBox" class="card" hidden>
+      <h3>房间 <span id="lobbyCode" class="code"></span>
+        <button id="copyBtn" class="link">复制邀请链接</button></h3>
+      <ul id="lobbyPlayers" class="plist"></ul>
+      <p id="lobbyHint" class="muted"></p>
+      <div class="row">
+        <button id="startBtn" class="primary">🎲 开始游戏</button>
+        <button id="leaveBtn">离开房间</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 游戏 -->
+  <section id="game" hidden>
+    <div id="boardWrap">
+      <svg id="board" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="卡坦岛棋盘"></svg>
+      <div id="hint" hidden></div>
+    </div>
+    <aside id="side">
+      <section id="turnBox"></section>
+      <section>
+        <h3>🏆 玩家 <small class="muted">（先到 10 分获胜）</small></h3>
+        <div id="players"></div>
+      </section>
+      <section>
+        <h3>🃏 我的手牌</h3>
+        <div id="hand"></div>
+        <div id="devs"></div>
+      </section>
+      <section id="actions"></section>
+      <section id="tradeBox" hidden></section>
+      <section>
+        <h3>📜 战报</h3>
+        <div id="log"></div>
+      </section>
+    </aside>
+  </section>
+
+  <div id="winner" hidden>
+    <div class="card">
+      <h2 id="winnerText"></h2>
+      <div class="row"><button id="backLobbyBtn" class="primary">返回大厅</button></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script src="static/game.js"></script>
+</body>
+</html>
