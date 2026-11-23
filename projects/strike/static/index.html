@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title data-i18n>突击行动 · Dev Lab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔫</text></svg>">
+  <link rel="stylesheet" href="static/style.css">
+  <script type="importmap">
+  {"imports": {"three": "./static/vendor/three.module.min.js"}}
+  </script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <!-- 顶部栏：始终可见 -->
+  <header id="topbar">
+    <a href="/" class="home ui-btn" data-i18n-title="返回 Dev Lab">🏠</a>
+    <span class="title" data-i18n>突击行动</span>
+    <span class="spacer"></span>
+    <button data-lang-toggle class="lang-toggle ui-btn"></button>
+  </header>
+
+  <!-- 游戏中的 HUD（进入房间后显示）。文字不接收触摸，只有带 ui-btn 的按钮会接收 -->
+  <div id="hud" class="hidden">
+    <div id="stats"><span><span data-i18n>击杀</span> <b id="kills">0</b></span><span><span data-i18n>死亡</span> <b id="deaths">0</b></span></div>
+    <div id="hpbar"><div id="hpfill"></div><span id="hptext">100</span></div>
+    <div id="feed"></div>
+    <div id="crosshair"></div>
+    <div id="hitmark"></div>
+    <div id="hurt"></div>
+    <div id="dead" class="hidden"><b data-i18n>你被击败了</b><span id="respawn"></span></div>
+    <div id="hint" data-i18n></div>
+
+    <div id="scoreboard" class="hidden">
+      <div class="sb-title" data-i18n>记分板</div>
+      <table><thead><tr><th data-i18n>名字</th><th data-i18n>击杀</th><th data-i18n>死亡</th></tr></thead><tbody id="rows"></tbody></table>
+    </div>
+
+    <div class="hud-buttons">
+      <button id="scoreBtn" class="ui-btn touch-only" data-i18n>记分</button>
+      <button id="leaveBtn" class="ui-btn" data-i18n>离开</button>
+    </div>
+
+    <div id="joyBase" class="touch-only hidden"><div id="joyKnob"></div></div>
+    <button id="fireBtn" class="ui-btn touch-only" data-i18n>开火</button>
+  </div>
+
+  <!-- 进入界面 -->
+  <main id="menu">
+    <div class="card">
+      <h1>🔫 <span data-i18n>突击行动</span></h1>
+      <p class="sub" data-i18n>CS 风格的多人第一人称射击，同一个竞技场里互相对战。</p>
+      <form id="joinForm">
+        <label for="nameInput" data-i18n>昵称</label>
+        <input id="nameInput" maxlength="12" autocomplete="off" required data-i18n-ph="1 到 12 个字符">
+        <button type="submit" class="primary" data-i18n>进入竞技场</button>
+      </form>
+      <p id="status" role="status"></p>
+      <div class="help">
+        <p><b data-i18n>电脑：</b><span data-i18n>W A S D 移动，鼠标转向，左键开火，按住 Tab 看记分板，Esc 释放鼠标。</span></p>
+        <p><b data-i18n>手机：</b><span data-i18n>左下角拖动移动，右半边屏幕滑动转向，右下角按住开火，建议横屏。</span></p>
+        <p data-i18n>爆头（子弹打在头部）一枪毙命。死亡后 3 秒自动复活。</p>
+      </div>
+    </div>
+  </main>
+
+  <div id="rotateHint" data-i18n>建议横屏</div>
+
+  <script src="/static/i18n.js"></script>
+  <script src="static/lang.js"></script>
+  <script type="module" src="static/game.js"></script>
+</body>
+</html>
