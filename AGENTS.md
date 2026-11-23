@@ -45,7 +45,7 @@ scripts/wait_for_deploy.sh                                               # push 
 3. **提交并直接 push 到 `main`**（目前是个人项目，不走 PR）：
    `git add <具体文件>` → `git commit` → `git push origin main`
 4. **等待部署上线**：运行 `scripts/wait_for_deploy.sh`。它会轮询 `/version`，直到线上版本等于刚推送的提交。
-5. **通知负责人刷新页面**，并说明改了什么。提醒：每次部署都会**重置游戏世界**（账号不受影响）。
+5. **通知负责人刷新页面**，并说明改了什么。游戏世界会在部署前自动存档、部署后恢复；如果这次改了存档格式，要提醒负责人「这次会开新世界」。
    如果这次改动需要负责人在**外部网站**上操作（见下面「改动时同步更新的文件」里的 🖐️ 项），必须逐条列出。
 
 测试没通过就不要 push。部署超时就去看 Render 的 Events/Logs，不要假装已上线。
@@ -60,7 +60,7 @@ scripts/wait_for_deploy.sh                                               # push 
 
 - 远程环境目前是**测试环境**，还没有真实玩家。以后有正式环境时会分出 `production` 分支、第二个 Render 服务和 Neon 分支。
 - `/version` 返回线上的提交号和数据库类型；`/health` 返回在线人数。
-- 游戏世界在**内存**里，重启/部署即清空；账户和登录会话在数据库里，会保留。
+- 游戏世界运行在**内存**里，每 30 秒（没人在线时 5 分钟）和服务器关闭前存档到数据库表 `world_snapshots`，启动时读取最新存档。正常部署不丢进度，崩溃最多丢约 30 秒。
 - 在 Render 上没有 `DATABASE_URL` 时服务会拒绝启动（防止悄悄用临时 SQLite 丢数据）。
 
 ## 改动时同步更新的文件
@@ -78,6 +78,7 @@ scripts/wait_for_deploy.sh                                               # push 
 | 换数据库 | `AGENTS.md`「环境」、`.env.example` | 新平台上的 `DATABASE_URL`；负责人本地 `.env` |
 | 新增 / 删除环境变量 | `app/settings.py`、`.env.example`；线上也需要的加进 `render.yaml` | Render 上填写实际值 |
 | 数据库表结构 | `app/db.py`；见「规范 → 数据库」 | 已有表需要在 Neon 上执行迁移 |
+| 游戏存档里的数据（`Game.to_dict` / `from_dict`） | 两个方法一起改；不兼容旧存档时把 `Game.SAVE_VERSION` +1，并在 `tests/test_persistence.py` 补测试 | 部署后会开新世界，事先告诉负责人 |
 | 新增依赖 | `requirements.txt`（或 `requirements-dev.txt`），固定版本号 | — |
 | 新增 API / 前端操作 | 对应的 `tests/`；用户可见的操作写进 `README.md`「操作」 | — |
 
@@ -98,6 +99,7 @@ scripts/wait_for_deploy.sh                                               # push 
 **数据库**
 - 表由 `init_db()` 里的 `create_all` 创建。它**只会新建不存在的表，不会修改已有的表**。
   给已有的表加/改字段时，必须同时处理 Neon 上的旧表（手动 `ALTER TABLE`，或引入 Alembic 做迁移），并告诉负责人。
+- 给游戏世界加了新的状态（新字段、新对象）时，**必须同时加进 `Game.to_dict` 和 `from_dict`**，否则重启后这部分数据会丢失。
 
 **提交**
 - 提交信息用英文，第一行简短说明做了什么，正文列出要点。

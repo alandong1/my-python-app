@@ -63,5 +63,5 @@ scripts/wait_for_deploy.sh             # push 到 main 后等待 Render 部署�
 ## 技术栈
 
 - 后端：Python（FastAPI）
-- 数据库：PostgreSQL（Neon），保存账户和登录会话；游戏世界目前仍在内存中，重启服务器会重置世界
+- 数据库：PostgreSQL（Neon），保存账户、登录会话和游戏世界存档（每 30 秒及关闭前自动存档，重启后恢复）
 - 部署：Render，从 GitHub 自动部署（启动命令 `uvicorn app.main:app --host 0.0.0.0 --port $PORT`）

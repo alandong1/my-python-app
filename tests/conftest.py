@@ -17,19 +17,13 @@ from app import auth  # noqa: E402
 from app.main import app  # noqa: E402
 
 
-@pytest.fixture(scope="session")
-def _app_client():
-    with TestClient(app) as c:
-        yield c
-
-
 @pytest.fixture
-def client(_app_client):
-    """每个测试开始时：退出登录、清空限流计数。"""
-    _app_client.cookies.clear()
+def client():
+    """每个测试一个全新的客户端：启动服务器（读档）→ 测试 → 关闭服务器（存档）。"""
     for limiter in (auth.login_limiter, auth.register_limiter, auth.guest_limiter, auth.email_limiter):
         limiter.hits.clear()
-    return _app_client
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture

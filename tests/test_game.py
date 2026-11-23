@@ -97,3 +97,15 @@ def test_view_hides_fog():
     visible = {(t[0], t[1]) for t in view["tiles"]}
     assert b.hq not in visible
     assert all(ar["owner"] == a.id for ar in view["armies"])
+
+
+def test_maps_always_have_room_and_reachable_center():
+    """回归测试：曾经中央被湖泊包围时，整张地图几乎都变成了高山，玩家无法出生（seed 7）。"""
+    from app import config as C
+    for seed in list(range(40)) + [7]:
+        g = Game(seed)
+        walkable = sum(1 for row in g.tiles for t in row if t.terrain not in C.IMPASSABLE)
+        assert walkable > g.w * g.h // 3, f"seed {seed} 可走地块只有 {walkable}"
+        assert g.tile(g.w // 2, g.h // 2).terrain not in C.IMPASSABLE
+        players = [g.join(i, f"p{i}") for i in range(4)]
+        assert all(p.alive for p in players)

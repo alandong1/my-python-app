@@ -123,19 +123,57 @@ def generate_map(w: int, h: int, seed: Optional[int] = None) -> List[List[Tile]]
         for dx in range(-1, 2):
             tiles[cy + dy][cx + dx].terrain = C.PLAINS
 
-    # 从中央洪泛，把不可达的孤岛变成高山，保证所有可走地块互通
-    seen = {(cx, cy)}
-    q = deque([(cx, cy)])
-    while q:
-        x, y = q.popleft()
-        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in seen \
-                    and tiles[ny][nx].terrain not in C.IMPASSABLE:
-                seen.add((nx, ny))
-                q.append((nx, ny))
+    def passable(x, y):
+        return tiles[y][x].terrain not in C.IMPASSABLE
+
+    def component(sx, sy):
+        seen = {(sx, sy)}
+        q = deque([(sx, sy)])
+        while q:
+            x, y = q.popleft()
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in seen and passable(nx, ny):
+                    seen.add((nx, ny))
+                    q.append((nx, ny))
+        return seen
+
+    # 找出最大的一片连通陆地
+    visited: set = set()
+    main: set = set()
     for y in range(h):
         for x in range(w):
-            if (x, y) not in seen and tiles[y][x].terrain not in C.IMPASSABLE:
+            if (x, y) not in visited and passable(x, y):
+                comp = component(x, y)
+                visited |= comp
+                if len(comp) > len(main):
+                    main = comp
+
+    # 中央如果不在最大陆地上（被湖泊或高山围住），就开一条路连过去
+    if (cx, cy) not in main:
+        prev = {(cx, cy): None}
+        q = deque([(cx, cy)])
+        end = None
+        while q:
+            cur = q.popleft()
+            if cur in main:
+                end = cur
+                break
+            x, y = cur
+            for n in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if 0 <= n[0] < w and 0 <= n[1] < h and n not in prev:
+                    prev[n] = cur
+                    q.append(n)
+        while end is not None:
+            ex, ey = end
+            if not passable(ex, ey):
+                tiles[ey][ex].terrain = C.PLAINS
+            end = prev[end]
+
+    # 不和中央连通的孤岛变成高山，保证所有可走地块互通
+    reachable = component(cx, cy)
+    for y in range(h):
+        for x in range(w):
+            if (x, y) not in reachable and passable(x, y):
                 tiles[y][x].terrain = C.MOUNTAIN
     return tiles
 
@@ -727,3 +765,77 @@ class Game:
                      for k, v in C.NPC_TYPES.items()},
             "maxLevel": C.MAX_BUILDING_LEVEL,
         }
+
+    # ---------- 存档 / 读档
+    # 存档格式版本。修改了下面存档的数据结构时 +1，旧存档就不会被错误地读进来。
+    SAVE_VERSION = 1
+
+    def to_dict(self) -> dict:
+        """把整个世界打包成可以转成 JSON 的字典。"""
+        w = self.w
+        return {
+            "version": self.SAVE_VERSION,
+            "w": self.w, "h": self.h,
+            "tick": self.tick_no,
+            "next_army": self._next_army,
+            "dragon_dead_at": self.dragon_dead_at,
+            # 每格：[地形, 主人, 建筑, 等级, 野怪]，按行展开
+            "tiles": [[t.terrain, t.owner, t.building, t.level, t.npc]
+                      for row in self.tiles for t in row],
+            "players": [{
+                "id": p.id, "account_id": p.account_id, "name": p.name, "color": p.color,
+                "alive": p.alive, "res": p.res, "research": p.research, "queue": p.queue,
+                "hq": list(p.hq) if p.hq else None,
+                # 探索过的格子用一个整数表示：y * 宽 + x，比存坐标对小得多
+                "explored": sorted(y * w + x for x, y in p.explored),
+            } for p in self.players.values()],
+            "armies": [{
+                "id": a.id, "owner": a.owner, "x": a.x, "y": a.y, "units": a.units,
+                "path": [list(c) for c in a.path], "progress": a.progress,
+            } for a in self.armies.values()],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Game":
+        """从存档恢复世界。格式不兼容时抛出 ValueError。"""
+        if d.get("version") != cls.SAVE_VERSION:
+            raise ValueError(f"存档版本 {d.get('version')} 与当前版本 {cls.SAVE_VERSION} 不一致")
+        if (d["w"], d["h"]) != (C.MAP_W, C.MAP_H):
+            raise ValueError(f"存档地图尺寸 {d['w']}x{d['h']} 与当前设置 {C.MAP_W}x{C.MAP_H} 不一致")
+        g = cls.__new__(cls)  # 跳过 __init__，不重新生成地图
+        g.w, g.h = d["w"], d["h"]
+        g.rng = random.Random()
+        g.tick_no = d["tick"]
+        g._next_army = d["next_army"]
+        g.dragon_dead_at = d["dragon_dead_at"]
+        g.tiles = []
+        flat = d["tiles"]
+        for y in range(g.h):
+            row = []
+            for x in range(g.w):
+                terrain, owner, building, level, npc = flat[y * g.w + x]
+                t = Tile(terrain)
+                t.owner, t.building, t.level, t.npc = owner, building, level, npc
+                row.append(t)
+            g.tiles.append(row)
+        g.players, g.by_account = {}, {}
+        for pd in d["players"]:
+            p = Player(pd["id"], pd["account_id"], pd["name"], pd["color"])
+            p.alive, p.res, p.research, p.queue = pd["alive"], pd["res"], pd["research"], pd["queue"]
+            p.hq = tuple(pd["hq"]) if pd["hq"] else None
+            p.explored = {(i % g.w, i // g.w) for i in pd["explored"]}
+            g.players[p.id] = p
+            g.by_account[p.account_id] = p.id
+        # 领地列表由地块的主人推出来，不单独存，避免两边不一致
+        for y in range(g.h):
+            for x in range(g.w):
+                owner = g.tiles[y][x].owner
+                if owner in g.players:
+                    g.players[owner].tiles.add((x, y))
+        g.armies = {}
+        for ad in d["armies"]:
+            a = Army(ad["id"], ad["owner"], ad["x"], ad["y"], ad["units"])
+            a.path = [tuple(c) for c in ad["path"]]
+            a.progress = ad["progress"]
+            g.armies[a.id] = a
+        return g

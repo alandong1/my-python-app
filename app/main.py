@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,14 +25,77 @@ from .auth import SESSION_COOKIE, lookup_session_user
 from .auth import router as auth_router
 from .db import describe_db, init_db
 from .game import Game, GameError, Player
+from .persistence import dump_world, load_latest, save_snapshot
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("game")
 STATIC = Path(__file__).resolve().parent.parent / "static"
 
+GAME_APP = "lordwar"          # 存档里用来区分不同游戏/应用
+SAVE_INTERVAL = 30            # 有玩家在线时，每 30 秒存一次档
+IDLE_SAVE_INTERVAL = 300      # 没人在线时，5 分钟存一次（离线玩家的资源仍在增长）
+
 seed = os.environ.get("MAP_SEED")
-game = Game(int(seed) if seed else None)
+game = Game(int(seed) if seed else None)   # 启动时如果有存档，会在 lifespan 里替换掉
 clients: Dict[WebSocket, Player] = {}
+
+
+class Saver:
+    """负责定期存档。同一时间只允许一次写入。"""
+
+    def __init__(self):
+        self.last = time.monotonic()
+        self.active_since_save = False   # 上次存档后是否有人在线
+        self.task: Optional[asyncio.Task] = None
+
+    def due(self) -> bool:
+        if self.task and not self.task.done():
+            return False
+        elapsed = time.monotonic() - self.last
+        return elapsed >= IDLE_SAVE_INTERVAL or (elapsed >= SAVE_INTERVAL and self.active_since_save)
+
+    def start(self):
+        """在游戏线程里拍快照，然后在后台写数据库，不耽误游戏运行。"""
+        data = game.to_dict()
+        payload = dump_world(data)
+        self.last = time.monotonic()
+        self.active_since_save = bool(clients)
+        self.task = asyncio.create_task(self._write(data["version"], data["tick"], payload))
+
+    async def _write(self, version, tick, payload):
+        try:
+            size = await run_in_threadpool(save_snapshot, GAME_APP, version, tick, payload)
+            log.info("世界已存档：tick %s，%.1f KB", tick, size / 1024)
+        except Exception:
+            log.exception("存档失败")
+
+    async def flush(self):
+        """关闭服务器前调用：等正在进行的写入完成，再存最后一次。"""
+        if self.task:
+            await self.task
+        self.start()
+        await self.task
+
+
+saver = Saver()
+
+
+async def load_world() -> Game:
+    try:
+        data = await run_in_threadpool(load_latest, GAME_APP)
+    except Exception:
+        log.exception("读取存档失败，开一个新世界")
+        data = None
+    if data is None:
+        log.info("没有存档，生成新世界")
+        return game
+    try:
+        g = Game.from_dict(data)
+        log.info("已读取存档：tick %s，%d 名玩家", g.tick_no, len(g.players))
+        return g
+    except (ValueError, KeyError, TypeError, IndexError) as e:
+        log.warning("存档无法读取（%s），开一个新世界。新世界的存档会逐渐替换掉旧存档。", e)
+        return game
 
 
 async def game_loop():
@@ -39,6 +103,10 @@ async def game_loop():
         await asyncio.sleep(C.TICK_SECONDS)
         try:
             game.tick()
+            if clients:
+                saver.active_since_save = True
+            if saver.due():
+                saver.start()
             board = game.scoreboard()
             for ws, p in list(clients.items()):
                 msg = game.view_for(p)
@@ -59,9 +127,18 @@ async def lifespan(_app: FastAPI):
         log.error("线上环境没有配置 DATABASE_URL！请在 Render 的 Environment 里添加 Neon 连接字符串。")
         raise RuntimeError("DATABASE_URL is required on Render")
     await run_in_threadpool(init_db)
+    global game
+    game = await load_world()
     task = asyncio.create_task(game_loop())
     yield
+    # 关闭（包括 Render 部署新版本时）：先停止游戏循环，再存最后一次档
     task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    await saver.flush()
+    log.info("关闭前已存档")
 
 
 app = FastAPI(title="领主战争", lifespan=lifespan)

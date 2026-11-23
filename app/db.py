@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
-from sqlalchemy import (Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint,
+from sqlalchemy import (Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
                         create_engine)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.types import TypeDecorator
@@ -91,6 +91,19 @@ class EmailVerification(Base):
     email: Mapped[str] = mapped_column(String(254))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class WorldSnapshot(Base):
+    """游戏世界存档：整个世界打包成一份 JSON。只保留最近几份。"""
+    __tablename__ = "world_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 哪个游戏 / 应用的存档。以后有多个项目时用它区分
+    app: Mapped[str] = mapped_column(String(32), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    tick: Mapped[int] = mapped_column(Integer)
+    data: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 _is_sqlite = settings.DATABASE_URL.startswith("sqlite")
