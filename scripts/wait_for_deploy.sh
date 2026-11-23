@@ -69,7 +69,8 @@ print_links() {
   projects=$(git diff --name-only "${WANT}^1" "$WANT" 2>/dev/null \
     | sed -n 's#^projects/\([a-z][a-z0-9_]*\)/.*#\1#p' | sort -u)
   for dir in $projects; do
-    [ -d "projects/$dir" ] || continue
+    # 按上线的那个提交判断项目是否存在（本地工作区可能还没拉到新项目；删除的项目不给链接）
+    git cat-file -e "${WANT}:projects/$dir/__init__.py" 2>/dev/null || continue
     echo "  - 项目页面：${URL}/apps/${dir//_/-}/"
   done
   echo "  - 网站首页：${URL}/"
