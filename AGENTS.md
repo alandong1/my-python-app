@@ -83,7 +83,7 @@ scripts/wait_for_deploy.sh                                               # 开 P
 
 ## 新建项目
 
-1. 和负责人确认：项目名、`slug`（网址里的英文名，小写字母开头，只能有小写字母、数字、连字符）、图标、分类、是否需要登录。
+1. 和负责人确认：项目名、`slug`（网址里的英文名，小写字母开头，只能有小写字母、数字、连字符）、图标、分类、是否需要登录，以及**技术选型**（见下一节「技术选型」）。
 2. 建目录 `projects/<slug>/`，至少包含：
    - `__init__.py`：定义 `PROJECT = Project(...)`（参考 `projects/lordwar/__init__.py`）
    - `server.py`：`router = APIRouter()`，至少有 `@router.get("/")` 返回 `html_page(STATIC / "index.html")`
@@ -97,6 +97,40 @@ scripts/wait_for_deploy.sh                                               # 开 P
 - **账户**：HTTP 接口里用 `app.auth.require_user`；WebSocket 里先 `ws_same_origin(ws)`，再用 `lookup_session_user(ws.cookies.get(SESSION_COOKIE))`。页面里没登录时跳转到 `/?login=1&next=<当前路径>`。
 - **存档**：`app.persistence` 的 `save_snapshot` / `load_latest`，用自己的 slug 区分。
 - **启动/关闭钩子**：`Project.startup` / `shutdown`，比如启动后台循环、关闭前存档。
+
+## 技术选型
+
+新建项目（或者项目的需求发生大的变化）时，AI 要**根据这个项目的需求选择语言和架构**，不要不假思索地照搬上一个项目。
+
+**「最合适」不等于「运行最快」**，综合看四点，按重要程度排列：
+1. **能满足需求**：性能够用、能在目标设备上运行（浏览器 / 手机 / 电脑）。
+2. **开发效率**：同样的功能，代码少、调试容易、有成熟的库。
+3. **部署和维护成本**：能不能放进现有平台（同一个网站、同一个 Render 服务、同一个数据库）。每多一种语言或一个服务，就多一份部署、监控和费用。
+4. **负责人能看懂**：负责人在学习开发，优先选主流、资料多的技术。
+
+**默认技术栈**（没有特殊需求就用这个，可以直接放进平台）：
+- 前端：原生 JavaScript（HTML + CSS），运行在浏览器里，电脑和手机都能用。
+- 后端：Python + FastAPI，作为平台里的一个项目（`projects/<slug>/`）。
+- 数据库：平台的 PostgreSQL，表名加 `<slug>_` 前缀。
+
+**按需求选择**：
+
+| 项目需求 | 推荐 | 放在哪里 |
+|---|---|---|
+| 简单的网页游戏 / 小工具，逻辑都在浏览器里 | 纯前端 JavaScript，服务器只负责发网页 | 平台内（例如 `snake`） |
+| 多人实时互动、需要服务器保存状态 | 前端 JavaScript + 后端 Python（WebSocket） | 平台内（例如 `lordwar`） |
+| 复杂的 2D 网页游戏（大量动画、物理效果） | JavaScript/TypeScript + 游戏引擎（如 Phaser） | 平台内，引擎文件放项目的 `static/` |
+| 前端代码很多、多人维护 | 考虑 TypeScript，需要加构建步骤，先和负责人商量 | 平台内 |
+| AI / 数据处理 | Python（生态最好）；耗时的计算放线程池，不要卡住事件循环 | 平台内；需要大量内存或 GPU 时单独部署 |
+| 服务器要同时承载成千上万人、每秒大量计算 | Go / Rust / Java / C# 等编译型语言 | **单独部署**，商店用 `external_url` 登记 |
+| 3D 游戏、要上架 Steam 或主机 | Unity（C#）/ Godot / Unreal（C++） | 单独的仓库或服务；能导出网页版的，可以挂到商店 |
+| 必须上架 App Store / Google Play 的手机 App | Flutter 或 React Native（一套代码两个平台）；需要深度用到手机功能时用 Swift / Kotlin | 单独的仓库；需要服务器时可以复用平台的接口 |
+
+**规则**：
+- 选默认技术栈时，直接开始。
+- **要用默认以外的语言、框架、构建工具，或者要单独部署时，先告诉负责人**：选了什么、为什么默认的不够用、会多出哪些部署和费用，等负责人同意再开始。
+- 不管选了什么，都把**选型和理由**写进项目的 `REQUIREMENTS.md`（「技术选型」一节），以后的 agent 才知道为什么这么选、什么情况下该换。
+- 不要为了「更快」过早优化：先用简单的方案做出来，真的遇到性能问题（有数据证明），再针对瓶颈优化或换技术。
 
 ## 项目之间的边界
 
@@ -131,6 +165,7 @@ scripts/wait_for_deploy.sh                                               # 开 P
 |---|---|---|
 | 平台需求（账户、首页、部署、跨项目约定） | `docs/requirements.md` | — |
 | 某个项目的需求 / 玩法 | `projects/<slug>/REQUIREMENTS.md` | — |
+| 项目的技术选型 | 项目 `REQUIREMENTS.md` 的「技术选型」一节；改默认技术栈时改 `AGENTS.md`「技术选型」 | 单独部署的项目：新服务的部署和费用 |
 | 新增 / 删除项目 | 只有 `projects/<slug>/` 目录本身（自动发现，不用登记） | — |
 | 项目名称 / 图标 / 分类 / 状态 | `projects/<slug>/__init__.py` 的 `PROJECT` | — |
 | 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要；`docs/requirements.md`「环境与部署」 | — |
