@@ -2,6 +2,9 @@
 // 突击行动的浏览器端：Three.js 画面、键鼠 / 触屏输入、移动预测、武器与商店、HUD。
 // 判定都在服务器（projects/strike/game.py）；这里的 move() 必须和服务器的 move() 保持一致，用于预测。
 import * as THREE from "three";
+import { EXRLoader } from "three/addons/loaders/EXRLoader.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 
 const tr = (...args) => i18n.t(...args);
 const $ = (id) => document.getElementById(id);
@@ -90,18 +93,34 @@ sun.shadow.bias = -0.0006;
 sun.shadow.normalBias = 0.03;
 scene.add(sun);
 
-// 环境反射：用一个小场景（天空 + 太阳）生成环境贴图，金属和光滑表面才会反射周围的天空，更有质感
-function buildEnvironment() {
-  const env = new THREE.Scene();
-  env.background = gradientTexture();
-  const glow = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff3d6 }));
-  glow.position.copy(sun.position).multiplyScalar(2.5);
-  env.add(glow);
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(env, 0.02).texture;
-  pmrem.dispose();
+// 真实的环境光：加载真实拍摄的城市 HDRI（CC0），用它照亮场景、反射到金属和玻璃上，并作为天空背景。
+// 加载在 loadAssets() 里完成；没加载成功时保留上面的渐变天空，游戏照常可以玩。
+let envTexture = null;
+let manGltf = null;            // CesiumMan 人物模型（加载成功后才有）
+let manScale = 1, manOffsetY = 0;
+
+async function loadAssets() {
+  try {
+    const exr = await new EXRLoader().loadAsync("static/assets/city.exr");
+    exr.mapping = THREE.EquirectangularReflectionMapping;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    envTexture = pmrem.fromEquirectangular(exr).texture;
+    pmrem.dispose();
+    scene.environment = envTexture;
+    scene.background = envTexture;
+  } catch (e) {
+    // 没加载到环境光：保留渐变天空，画面仍然可以玩
+  }
+  try {
+    manGltf = await new GLTFLoader().loadAsync("static/assets/CesiumMan.glb");
+    const box = new THREE.Box3().setFromObject(manGltf.scene);
+    const height = box.max.y - box.min.y;
+    manScale = 1.8 / height;             // 统一成 1.8 米高，和碰撞体一致
+    manOffsetY = -box.min.y * manScale;  // 脚踩在地面上
+  } catch (e) {
+    manGltf = null;                      // 没加载到人物：用原来的胶囊人物
+  }
 }
-buildEnvironment();
 
 function gradientTexture() {
   // 天空：上面是蓝天，靠近地平线逐渐变成雾的颜色
@@ -512,6 +531,36 @@ function nameSprite(text) {
 }
 
 function makeRemote(p) {
+  if (!manGltf) return makeRemoteCapsule(p);
+  const group = new THREE.Group();
+  const root = SkeletonUtils.clone(manGltf.scene);
+  root.rotation.y = Math.PI;             // 模型默认朝 +z，转到朝 -z（游戏里的前方）
+  root.scale.setScalar(manScale);
+  root.position.y = manOffsetY;
+  const tint = new THREE.Color(COLORS[p.id % COLORS.length]);
+  root.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.material = o.material.clone();
+      o.material.color.copy(tint);       // 按玩家的颜色染色，方便区分
+    }
+  });
+  const mixer = new THREE.AnimationMixer(root);
+  const clip = manGltf.animations[0];
+  const action = clip ? mixer.clipAction(clip) : null;
+  if (action) action.play();
+  const gunPivot = new THREE.Group();   // 枪挂在胸前，随视线上下转动
+  gunPivot.position.set(0.12, 1.25, -0.08);
+  gunPivot.add(part(new THREE.BoxGeometry(0.1, 0.12, 0.62), gearMat, 0.05, 0, -0.35));
+  group.add(root, gunPivot, nameSprite(p.name));
+  group.position.set(p.x, 0, p.z);
+  scene.add(group);
+  const r = { group, gunPivot, target: p, mixer, action, moving: 0 };
+  remotes.set(p.id, r);
+  return r;
+}
+
+function makeRemoteCapsule(p) {
   const group = new THREE.Group();
   const suit = new THREE.MeshStandardMaterial({ color: COLORS[p.id % COLORS.length], roughness: 0.7 });
   const pants = new THREE.MeshStandardMaterial({ color: 0x3a3f2e, roughness: 0.9 });
@@ -546,14 +595,22 @@ function makeRemote(p) {
   return r;
 }
 
-function updateRemotes() {
+function updateRemotes(dt) {
   for (const r of remotes.values()) {
     const t = r.target;
     const g = r.group;
-    g.position.x += (t.x - g.position.x) * 0.35;
-    g.position.z += (t.z - g.position.z) * 0.35;
+    const px = g.position.x, pz = g.position.z;
+    g.position.x += (t.x - px) * 0.35;
+    g.position.z += (t.z - pz) * 0.35;
     g.rotation.y = t.yaw;
     r.gunPivot.rotation.x = t.pitch;
+    if (r.mixer) {
+      // 走路时播放行走动画，站着不动时停在第一帧
+      const speed = dt > 0 ? Math.hypot(g.position.x - px, g.position.z - pz) / dt : 0;
+      r.moving = r.moving + (speed - r.moving) * Math.min(1, dt * 6);
+      if (r.action) r.action.paused = r.moving < 0.25;
+      r.mixer.update(dt);
+    }
   }
 }
 
@@ -1041,7 +1098,7 @@ function frame(now) {
   lastFrameAt = now;
   if (!arenaBuilt) return;
   networkTick(now);
-  updateRemotes();
+  updateRemotes(dt);
   updateTracers(now);
   updateParticles(dt);
 
@@ -1072,8 +1129,18 @@ function frame(now) {
 
 const nameInput = $("nameInput");
 try { nameInput.value = localStorage.getItem("strike-name") || ""; } catch (e) { /* 隐私模式下忽略 */ }
+let assetsReady = false;
+const joinBtn = $("joinForm").querySelector("button.primary");
+joinBtn.disabled = true;
+setStatus(tr("正在加载画面…"), false);
+loadAssets().then(() => {
+  assetsReady = true;
+  joinBtn.disabled = false;
+  setStatus("", false);
+});
 $("joinForm").addEventListener("submit", (e) => {
   e.preventDefault();
+  if (!assetsReady) return;
   const name = nameInput.value.trim().slice(0, 12) || tr("匿名玩家");
   try { localStorage.setItem("strike-name", name); } catch (e2) { /* 忽略 */ }
   enterFullscreen();     // 点击「进入竞技场」是用户操作，这时进入全屏浏览器才允许

@@ -40,6 +40,8 @@ i18n.add({
   "副武器": "Secondary",
   "死亡后不能购买，复活后再来": "You can't buy while dead. Buy again after you respawn.",
   "购买后自动装备，替换同一槽位的武器。电脑按 1 / 2 切换主武器和副武器，按 B 开关商店。": "Bought weapons are equipped automatically and replace the one in the same slot. On desktop, press 1 / 2 to switch primary and secondary, and B to open or close the shop.",
+  "正在加载画面…": "Loading graphics…",
+  "人物模型 CesiumMan 由 Cesium 制作，CC BY 4.0。环境光来自 pmndrs/assets（CC0）。": "Character model CesiumMan by Cesium, CC BY 4.0. Environment light from pmndrs/assets (CC0).",
   "手枪": "Pistol",
   "沙漠之鹰": "Desert Eagle",
   "冲锋枪": "SMG",
