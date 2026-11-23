@@ -73,11 +73,17 @@
     <form id="createForm" class="card">
       <h2>建房</h2>
       <label>房间名<input id="roomName" maxlength="20" placeholder="比如：周末来一局"></label>
+      <label>对手</label>
+      <div class="modes">
+        <label><input type="radio" name="opponent" value="player" checked> 开放给玩家</label>
+        <label><input type="radio" name="opponent" value="ai"> 电脑（人机，自己打）</label>
+      </div>
       <label>比赛方式</label>
       <div class="modes">
         <label><input type="radio" name="mode" value="single" checked> 单打（2 人）</label>
         <label><input type="radio" name="mode" value="double"> 双打（4 人）</label>
       </div>
+      <p id="aiNote" class="muted" hidden>人机对战只能单打。电脑会坐在对面，房间不出现在大厅里。</p>
       <div class="row">
         <button type="submit" class="primary">建房</button>
         <button type="button" id="dlgCancel">取消</button>

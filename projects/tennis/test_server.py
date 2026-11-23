@@ -156,3 +156,35 @@ def test_guest_can_join_but_websocket_needs_login(client):
         expect(gws, "hello")
         gws.send_json({"type": "join", "roomId": room_id})
         assert expect(gws, "state")["room"]["id"] == room_id
+
+
+def test_ai_room_is_hidden_from_lobby_and_only_host_plays(client):
+    host, _ = registered(client, "tennis_ai_host")
+    r = client.post("/apps/tennis/api/rooms", json={"name": "练习", "mode": "single", "opponent": "ai"},
+                    cookies=host)
+    assert r.status_code == 200, r.text
+    room_id = r.json()["id"]
+    assert r.json()["ai"] is True
+    guest_cookies, _ = guest(client)
+    # 大厅里看不到人机房间
+    assert client.get("/apps/tennis/api/rooms", cookies=guest_cookies).json()["rooms"] == []
+    with connect(client, host) as hws:
+        expect(hws, "hello")
+        hws.send_json({"type": "join", "roomId": room_id})
+        state = expect(hws, "state")
+        assert state["room"]["ai"] is True
+        assert [s is not None for s in state["seats"]] == [True, True]
+        assert state["seats"][1]["isAi"] is True and state["seats"][1]["name"] == "电脑"
+        hws.send_json({"type": "start"})
+        started = expect(hws, "state", where=lambda m: m["status"] == "playing")
+        assert started["status"] == "playing"
+
+
+def test_ai_room_rejects_doubles_and_bad_opponent(client):
+    host, _ = registered(client, "tennis_ai_bad")
+    r = client.post("/apps/tennis/api/rooms", json={"name": "x", "mode": "double", "opponent": "ai"},
+                    cookies=host)
+    assert r.status_code == 400 and "只能单打" in r.json()["detail"]
+    r = client.post("/apps/tennis/api/rooms", json={"name": "x", "mode": "single", "opponent": "robot"},
+                    cookies=host)
+    assert r.status_code == 400

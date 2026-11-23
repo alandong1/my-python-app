@@ -112,19 +112,36 @@ function leaveRoom() {
 function openCreate() {
   if (S.isGuest) return;
   $('roomName').value = '';
+  document.querySelector('input[name=opponent][value=player]').checked = true;
+  document.querySelector('input[name=mode][value=single]').checked = true;
+  syncOpponent();
   $('dlg').hidden = false;
   $('roomName').focus();
+}
+
+// 选了「电脑」就锁定单打（双打选项不可选）
+function syncOpponent() {
+  const ai = document.querySelector('input[name=opponent]:checked').value === 'ai';
+  const single = document.querySelector('input[name=mode][value=single]');
+  const double = document.querySelector('input[name=mode][value=double]');
+  if (ai) { single.checked = true; }
+  double.disabled = ai;
+  $('aiNote').hidden = !ai;
+}
+for (const r of document.querySelectorAll('input[name=opponent]')) {
+  r.addEventListener('change', syncOpponent);
 }
 
 async function createRoom(e) {
   e.preventDefault();
   const name = $('roomName').value.trim();
   const mode = document.querySelector('input[name=mode]:checked').value;
+  const opponent = document.querySelector('input[name=opponent]:checked').value;
   if (!name) return toast('请填写房间名');
   const r = await fetch(BASE + 'api/rooms', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, mode }),
+    body: JSON.stringify({ name, mode, opponent }),
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) return toast(data.detail || '建房失败');
@@ -137,14 +154,17 @@ async function createRoom(e) {
 function renderRoom(state) {
   const room = state.room;
   $('roomTitle').textContent = room.name;
-  $('roomMeta').textContent = `${room.modeName} · 房主 ${room.host} · 先到先得，满员后房主开始`;
+  $('roomMeta').textContent = room.ai
+    ? `单打 · 人机对战（你对电脑）`
+    : `${room.modeName} · 房主 ${room.host} · 先到先得，满员后房主开始`;
   const seats = $('seats');
   seats.replaceChildren();
   state.seats.forEach((s, i) => {
     const team = i < state.seats.length / 2 ? '队 A' : '队 B';
     if (s) {
+      const tag = s.isAi ? '' : (s.userId === room.hostId ? '（房主）' : '') + (s.userId === S.me.id ? '（你）' : '');
       seats.append(el('div', { class: 'seat' }, [
-        el('span', { text: `${team} · ${s.name}${s.userId === room.hostId ? '（房主）' : ''}${s.userId === S.me.id ? '（你）' : ''}` }),
+        el('span', { text: `${team} · ${s.name}${tag}` }),
         el('span', { class: 'muted', text: `${i + 1} 号位` }),
       ]));
     } else {
@@ -158,9 +178,11 @@ function renderRoom(state) {
   const full = state.seats.every(Boolean);
   $('startBtn').hidden = !isHost;
   $('startBtn').disabled = !full;
-  $('roomHint').textContent = isHost
-    ? (full ? '人已到齐，可以开始比赛了。' : '等待其他人加入…')
-    : '等待房主开始比赛…';
+  $('roomHint').textContent = room.ai
+    ? '电脑已就位，点「开始比赛」。你先发球。'
+    : isHost
+      ? (full ? '人已到齐，可以开始比赛了。' : '等待其他人加入…')
+      : '等待房主开始比赛…';
 }
 
 // ------------------------------------------------------------ 三维场景

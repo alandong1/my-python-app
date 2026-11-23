@@ -46,7 +46,7 @@ def _account(token: Optional[str]):
 # ------------------------------------------------------------------ 发给前端的数据
 
 def _room_meta(room: Room) -> dict:
-    return {"id": room.id, "name": room.name, "mode": room.mode,
+    return {"id": room.id, "name": room.name, "mode": room.mode, "ai": room.ai,
             "modeName": "单打" if room.mode == "single" else "双打",
             "host": room.host_name, "hostId": room.host_id, "capacity": room.capacity}
 
@@ -58,7 +58,8 @@ def _room_msg(room: Room) -> dict:
 
 
 def _lobby_msg() -> dict:
-    return {"type": "lobby", "rooms": [r.summary() for r in rooms.values()]}
+    # 人机房间只有房主自己能进，不出现在大厅
+    return {"type": "lobby", "rooms": [r.summary() for r in rooms.values() if not r.ai]}
 
 
 async def _send(ws: WebSocket, msg: dict):
@@ -127,7 +128,8 @@ async def page():
 
 class RoomIn(BaseModel):
     name: str
-    mode: str        # "single" 单打 / "double" 双打
+    mode: str                 # "single" 单打 / "double" 双打
+    opponent: str = "player"  # "player" 开放给玩家 / "ai" 电脑（人机，只能单打）
 
 
 @router.get("/api/rooms")
@@ -147,12 +149,17 @@ async def create_room(body: RoomIn, request: Request):
         raise HTTPException(403, "游客不能建房，请先注册账号")
     if body.mode not in ("single", "double"):
         raise HTTPException(400, "请选择单打或双打")
+    if body.opponent not in ("player", "ai"):
+        raise HTTPException(400, "请选择对手")
+    if body.opponent == "ai" and body.mode != "single":
+        raise HTTPException(400, "人机对战只能单打")
     name = body.name.strip()
     if not 1 <= len(name) <= 20:
         raise HTTPException(400, "房间名要 1 到 20 个字")
     if sum(1 for r in rooms.values() if r.host_id == uid) >= MAX_ROOMS_PER_HOST:
         raise HTTPException(409, "你已经有一个房间了，先解散它再建新的")
-    room = Room(id=new_room_id(), name=name, mode=body.mode, host_id=uid, host_name=uname)
+    room = Room(id=new_room_id(), name=name, mode=body.mode, host_id=uid, host_name=uname,
+                ai=body.opponent == "ai")
     rooms[room.id] = room
     room_members[room.id] = {}
     await _broadcast_lobby()

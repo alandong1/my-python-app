@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import random
 
 import pytest
 
@@ -339,3 +340,80 @@ def test_full_random_match_finishes_without_errors():
                                        max(-1, min(1, (target_z - s.z) * 0.8)))
             room.events.clear()
         assert room.score.total_games > 0
+
+
+# ------------------------------------------------------------------ 人机对战
+
+def make_ai_room(seed=1):
+    room = Room(id="ai", name="人机", mode="single", host_id=1, host_name="房主", ai=True)
+    room.rng.seed(seed)
+    return room
+
+
+def test_ai_room_is_full_single_and_has_ai_seat():
+    room = make_ai_room()
+    assert room.player_count() == 2
+    seat = room.ai_seat()
+    assert seat is not None and seat.is_ai and seat.team == 1 and seat.user_id == -1
+    with pytest.raises(RoomError, match="只支持单打"):
+        Room(id="x", name="x", mode="double", host_id=1, host_name="a", ai=True)
+
+
+def test_ai_is_full_so_host_can_start_immediately():
+    room = make_ai_room()
+    room.start(1)
+    assert room.status == "playing"
+
+
+def test_ai_serves_by_itself_when_it_is_its_turn():
+    room = make_ai_room()
+    room.start(1)
+    room.score.total_games = 1        # 第二局轮到 2 号位（电脑）发球
+    room._prepare_serve()
+    assert room.server_seat == room.ai_seat().index
+    hits = []
+    for _ in range(30 * 6):           # 6 秒游戏时间内，电脑应该完成抛球和发球
+        room.tick(1 / 30)
+        hits += [e for e in room.events if e["type"] == "hit"]
+        room.events.clear()
+        if hits:
+            break
+    assert hits and hits[0]["seat"] == room.ai_seat().index and hits[0]["serve"]
+    assert room.phase == "rally"
+
+
+def _human_plays(room, rng):
+    """测试用的「真人」：轮到自己发球时发球，对打时偶尔够得到就击球。"""
+    h = room.seat_of(1)
+    if room.phase == "serve_wait" and room.server_seat == h.index:
+        room.swing(1, "top")
+    elif room.phase == "toss" and room.server_seat == h.index and room.ball.vy < 0 and 1.8 <= room.ball.y <= 2.8:
+        try:
+            room.swing(1, "flat", 0.0, 0.0)
+        except RoomError:
+            pass
+    elif room.phase == "rally" and h.index != room.last_seat \
+            and math.hypot(room.ball.x - h.x, room.ball.z - h.z) < REACH and rng.random() < 0.7:
+        try:
+            room.swing(1, rng.choice(["flat", "top", "back"]), rng.uniform(-1, 1), 0.0)
+        except RoomError:
+            pass
+
+
+def test_full_match_against_ai_finishes_and_both_sides_score():
+    rng = random.Random(3)
+    room = make_ai_room(seed=3)
+    room.start(1)
+    ai_hits = 0
+    for _ in range(30 * 60 * 30):      # 最多 30 分钟的比赛时间
+        room.tick(1 / 30)
+        _human_plays(room, rng)
+        for e in room.events:
+            if e["type"] == "hit" and e["seat"] == room.ai_seat().index:
+                ai_hits += 1
+        room.events.clear()
+        if room.status == "finished":
+            break
+    assert room.status == "finished"
+    assert ai_hits > 20                # 电脑确实在打球，不是站着不动
+    assert room.score.winner in (0, 1)
