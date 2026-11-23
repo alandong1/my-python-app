@@ -32,4 +32,6 @@ i18n.add({
   "左下摇杆移动 · 右侧滑动转向 · 右下按钮开火": "Bottom-left stick: move · Swipe right side: look · Bottom-right: fire",
   "（你）": " (you)",
   "匿名玩家": "Anonymous",
+  "全屏": "Fullscreen",
+  "退出全屏": "Exit fullscreen",
 });
