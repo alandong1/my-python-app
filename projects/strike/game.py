@@ -1,4 +1,4 @@
-"""突击行动的游戏逻辑：移动、碰撞、射线、开火、死亡和复活。
+"""突击行动的游戏逻辑：移动、碰撞、射线、武器、金钱、狙击镜、开火、死亡和复活。
 
 这里是纯逻辑，不依赖 WebSocket，方便写单元测试。
 服务器是唯一的裁判；static/game.js 里的 move() 与这里的 move() 保持一致，用于客户端预测。
@@ -8,12 +8,13 @@ from __future__ import annotations
 import math
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from . import config as C
 
 Vec = Tuple[float, float, float]
+SLOTS = ("primary", "secondary")
 
 
 def blocked(x: float, z: float, walls=C.WALLS) -> bool:
@@ -79,6 +80,10 @@ def ray_box(o: Vec, d: Vec, lo: Vec, hi: Vec) -> Optional[float]:
     return tmin
 
 
+def _default_slots() -> Dict[str, Optional[str]]:
+    return {"primary": None, "secondary": C.DEFAULT_WEAPON}
+
+
 @dataclass
 class Player:
     id: int
@@ -96,6 +101,13 @@ class Player:
     last_fire: float = -1e9
     last_input: float = 0.0
     budget: float = 0.1      # 移动时间预算（秒）
+    money: int = C.START_MONEY
+    slots: Dict[str, Optional[str]] = field(default_factory=_default_slots)   # 主武器 / 副武器
+    active: str = "secondary"                                                  # 当前拿着哪个槽位
+    scoped: bool = False                                                       # 是否开着狙击镜
+
+    def weapon(self) -> dict:
+        return C.WEAPONS[self.slots[self.active] or C.DEFAULT_WEAPON]
 
 
 class Arena:
@@ -167,17 +179,55 @@ class Arena:
             return
         p.x, p.z = move(p.x, p.z, fwd, side, p.yaw, dt)
 
+    def equip(self, pid: int, slot: str) -> None:
+        """切换到主武器或副武器（只能切到自己有的武器）。切换时狙击镜会关闭。"""
+        p = self.players.get(pid)
+        if p is None or slot not in SLOTS or p.slots[slot] is None:
+            return
+        p.active = slot
+        p.scoped = False
+
+    def set_scope(self, pid: int, on: bool) -> None:
+        """开 / 关狙击镜。只有带镜的武器才能开；开镜后散布变小。"""
+        p = self.players.get(pid)
+        if p is None:
+            return
+        p.scoped = bool(on) and p.alive and p.weapon()["zoom"] > 0
+
+    def buy(self, pid: int, weapon_id: str) -> bool:
+        """买一把武器，自动装备到它所在的槽位（替换掉那个槽位原来的武器）。
+        只能在活着的时候买；手枪是免费的默认武器，不能买。"""
+        p = self.players.get(pid)
+        if p is None or not p.alive:
+            return False
+        w = C.WEAPONS.get(weapon_id)
+        if w is None or w["price"] <= 0:
+            return False
+        slot = w["slot"]
+        if p.slots[slot] == weapon_id or p.money < w["price"]:
+            return False
+        p.money -= w["price"]
+        p.slots[slot] = weapon_id
+        p.active = slot
+        p.scoped = False
+        return True
+
     def fire(self, pid: int) -> None:
         p = self.players.get(pid)
         if p is None or not p.alive:
             return
+        w = p.weapon()
         now = self.clock()
-        if now - p.last_fire < C.FIRE_INTERVAL:
+        if now - p.last_fire < w["interval"]:
             return
         p.last_fire = now
 
+        # 散布：每次开火在朝向上随机偏一点（开镜时只有十分之一）
+        spread = w["spread"] * (0.1 if p.scoped else 1.0)
+        yaw = p.yaw + self.rng.uniform(-spread, spread)
+        pitch = p.pitch + self.rng.uniform(-spread, spread)
         origin: Vec = (p.x, C.EYE_HEIGHT, p.z)
-        d = direction(p.yaw, p.pitch)
+        d = direction(yaw, pitch)
 
         # 先算子弹能飞多远：墙、箱子、地面和射程
         reach = C.MAX_RANGE
@@ -204,7 +254,7 @@ class Arena:
         if target is None:
             return
         head = end[1] >= C.HEAD_HEIGHT
-        dmg = C.HEAD_DAMAGE if head else C.BODY_DAMAGE
+        dmg = w["head"] if head else w["body"]
         target.hp = max(target.hp - dmg, 0)
         self.events.append({"e": "hit", "by": p.id, "to": target.id, "dmg": dmg, "head": head})
         if target.hp <= 0:
@@ -214,7 +264,11 @@ class Arena:
         victim.alive = False
         victim.deaths += 1
         victim.respawn_at = now + C.RESPAWN_SECONDS
+        victim.slots = _default_slots()     # 死了就只剩手枪，钱保留
+        victim.active = "secondary"
+        victim.scoped = False
         killer.kills += 1
+        killer.money = min(C.MAX_MONEY, killer.money + C.KILL_REWARD)
         self.events.append({"e": "kill", "by": killer.id, "to": victim.id, "head": head})
 
     # ---- 给客户端的数据
@@ -238,7 +292,8 @@ class Arena:
         now = self.clock()
         return {"x": round(p.x, 3), "z": round(p.z, 3), "hp": p.hp, "alive": p.alive, "ack": p.ack,
                 "respawn_in": round(max(p.respawn_at - now, 0.0), 2) if not p.alive else 0.0,
-                "kills": p.kills, "deaths": p.deaths}
+                "kills": p.kills, "deaths": p.deaths, "money": p.money,
+                "slots": dict(p.slots), "active": p.active, "scoped": p.scoped}
 
 
 def _r(v: Vec) -> List[float]:

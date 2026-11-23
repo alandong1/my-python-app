@@ -6,6 +6,9 @@
     {"t":"join","name":"昵称"}
     {"t":"in","seq":1,"fwd":1,"side":0,"yaw":0,"pitch":0,"dt":0.033}   移动输入（约每秒 30 次）
     {"t":"fire"}                                                       开火
+    {"t":"buy","weapon":"smg"}                                         买武器（自动装备）
+    {"t":"equip","slot":"primary"}                                     切换主武器 / 副武器
+    {"t":"scope","on":true}                                            开 / 关狙击镜
   服务器 → 浏览器
     {"t":"welcome","id":1,"map":{...},"sim":{...}}                     进入房间时发一次
     {"t":"state","you":{...},"players":[...],"events":[...]}            每 0.05 秒一次
@@ -40,8 +43,9 @@ MAP = {"half": C.ARENA_HALF, "walls": C.WALLS, "spawns": C.SPAWNS}
 SIM = {
     "radius": C.PLAYER_RADIUS, "height": C.PLAYER_HEIGHT, "eye": C.EYE_HEIGHT,
     "head": C.HEAD_HEIGHT, "speed": C.MOVE_SPEED, "maxDt": C.MAX_DT,
-    "maxPitch": C.MAX_PITCH, "fireInterval": C.FIRE_INTERVAL, "maxHp": C.MAX_HP,
+    "maxPitch": C.MAX_PITCH, "maxHp": C.MAX_HP,
     "respawn": C.RESPAWN_SECONDS, "tick": C.TICK_SECONDS,
+    "weapons": C.WEAPONS,
 }
 
 
@@ -104,6 +108,16 @@ async def ws_endpoint(ws: WebSocket):
                 )
             elif t == "fire":
                 arena.fire(pid)
+            elif t == "buy":
+                wid = msg.get("weapon")
+                if isinstance(wid, str):
+                    arena.buy(pid, wid)
+            elif t == "equip":
+                slot = msg.get("slot")
+                if isinstance(slot, str):
+                    arena.equip(pid, slot)
+            elif t == "scope":
+                arena.set_scope(pid, msg.get("on") is True)
             # 其他类型的消息直接忽略，保持向前兼容
     except WebSocketDisconnect:
         pass

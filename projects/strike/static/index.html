@@ -24,10 +24,11 @@
 
   <!-- 游戏中的 HUD（进入房间后显示）。文字不接收触摸，只有带 ui-btn 的按钮会接收 -->
   <div id="hud" class="hidden">
-    <div id="stats"><span><span data-i18n>击杀</span> <b id="kills">0</b></span><span><span data-i18n>死亡</span> <b id="deaths">0</b></span></div>
+    <div id="stats"><span><span data-i18n>击杀</span> <b id="kills">0</b></span><span><span data-i18n>死亡</span> <b id="deaths">0</b></span><span><span data-i18n>金钱</span> <b id="money">$0</b></span></div>
     <div id="hpbar"><div id="hpfill"></div><span id="hptext">100</span></div>
     <div id="feed"></div>
     <div id="crosshair"></div>
+    <div id="scopeOverlay" class="hidden"></div>
     <div id="hitmark"></div>
     <div id="hurt"></div>
     <div id="dead" class="hidden"><b data-i18n>你被击败了</b><span id="respawn"></span></div>
@@ -39,9 +40,13 @@
     </div>
 
     <div class="hud-buttons">
+      <button id="shopBtn" class="ui-btn" data-i18n>商店</button>
       <button id="scoreBtn" class="ui-btn touch-only" data-i18n>记分</button>
       <button id="leaveBtn" class="ui-btn" data-i18n>离开</button>
     </div>
+    <div id="weaponName"></div>
+    <button id="swapBtn" class="ui-btn touch-only" data-i18n>换枪</button>
+    <button id="scopeBtn" class="ui-btn touch-only hidden" data-i18n>瞄准</button>
 
     <div id="joyBase" class="touch-only hidden"><div id="joyKnob"></div></div>
     <button id="fireBtn" class="ui-btn touch-only" data-i18n>开火</button>
@@ -66,7 +71,15 @@
     </div>
   </main>
 
-  <div id="rotateHint" data-i18n>建议横屏</div>
+  <!-- 商店：点「商店」或按 B 打开 -->
+  <div id="shop" class="hidden">
+    <div class="shop-card">
+      <div class="shop-head"><b data-i18n>商店</b><span id="shopMoney"></span><button id="shopClose" class="ui-btn" data-i18n>关闭</button></div>
+      <p id="shopNote" class="shop-note"></p>
+      <div id="shopList"></div>
+      <p class="shop-help" data-i18n>购买后自动装备，替换同一槽位的武器。电脑按 1 / 2 切换主武器和副武器，按 B 开关商店。</p>
+    </div>
+  </div>
 
   <script src="/static/i18n.js"></script>
   <script src="static/lang.js"></script>

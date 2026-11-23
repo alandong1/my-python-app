@@ -7,6 +7,8 @@ import pytest
 from projects.strike import config as C
 from projects.strike.game import Arena, direction, move, ray_box
 
+PISTOL = C.WEAPONS["pistol"]
+
 
 class Clock:
     def __init__(self):
@@ -121,7 +123,7 @@ def test_body_shot_does_25_damage(arena, clock):
     a, b = two_players(arena, clock)
     a.pitch = math.atan2(1.0 - C.EYE_HEIGHT, 10.0)   # 瞄准约 1 米高的身体
     arena.fire(a.id)
-    assert b.hp == C.MAX_HP - C.BODY_DAMAGE
+    assert b.hp == C.MAX_HP - PISTOL['body']
     hits = [e for e in arena.take_events() if e["e"] == "hit"]
     assert len(hits) == 1 and hits[0]["head"] is False
 
@@ -157,10 +159,10 @@ def test_low_crate_blocks_low_shots_but_not_high_ones(arena, clock):
     a.pitch = math.atan2(0.5 - C.EYE_HEIGHT, 10.0)   # 子弹经过箱子时约 1.05 米，被挡住
     arena.fire(a.id)
     assert b.hp == C.MAX_HP
-    clock.t += C.FIRE_INTERVAL
+    clock.t += PISTOL['interval'] + 0.01
     a.pitch = math.atan2(1.0 - C.EYE_HEIGHT, 10.0)   # 子弹经过箱子时约 1.3 米，从箱子上方飞过
     arena.fire(a.id)
-    assert b.hp == C.MAX_HP - C.BODY_DAMAGE
+    assert b.hp == C.MAX_HP - PISTOL['body']
 
 
 def test_fire_rate_limit(arena, clock):
@@ -170,7 +172,7 @@ def test_fire_rate_limit(arena, clock):
     arena.fire(a.id)                               # 同一时刻，超过射速，应被忽略
     shots = [e for e in arena.take_events() if e["e"] == "shot"]
     assert len(shots) == 1
-    clock.t += C.FIRE_INTERVAL
+    clock.t += PISTOL['interval'] + 0.01
     arena.fire(a.id)
     assert len([e for e in arena.take_events() if e["e"] == "shot"]) == 1
 
@@ -182,7 +184,7 @@ def test_dead_players_cannot_fire_or_be_hit(arena, clock):
     assert b.hp == C.MAX_HP
     assert not [e for e in arena.take_events() if e["e"] == "hit"]
     a.alive = False
-    clock.t += C.FIRE_INTERVAL
+    clock.t += PISTOL['interval'] + 0.01
     arena.fire(a.id)
     assert not [e for e in arena.take_events() if e["e"] == "shot"]
 
@@ -250,3 +252,139 @@ def test_take_events_clears_queue(arena, clock):
     arena.fire(a.id)
     assert arena.take_events()
     assert arena.take_events() == []
+
+
+# ---------------------------------------------------------------- 武器、金钱、狙击镜、商店
+
+def test_start_with_pistol_and_money(arena, clock):
+    a = arena.add_player("甲")
+    assert a.money == C.START_MONEY
+    assert a.slots == {"primary": None, "secondary": "pistol"} and a.active == "secondary"
+
+
+def test_cannot_buy_without_money_or_when_dead(arena, clock):
+    a = arena.add_player("甲")
+    a.money = C.WEAPONS["sniper"]["price"] - 1
+    assert not arena.buy(a.id, "sniper")
+    a.money = 10 ** 6
+    a.alive = False
+    assert not arena.buy(a.id, "smg")
+    assert a.money == 10 ** 6
+
+
+def test_buy_equips_and_charges(arena, clock):
+    a = arena.add_player("甲")
+    a.money = 5000
+    assert arena.buy(a.id, "smg")
+    assert a.money == 5000 - C.WEAPONS["smg"]["price"]
+    assert a.slots["primary"] == "smg" and a.active == "primary"
+    assert not arena.buy(a.id, "smg")                       # 已经拥有，不能重复买
+    assert not arena.buy(a.id, "pistol")                    # 手枪是免费的，不能买
+
+
+def test_buy_replaces_same_slot(arena, clock):
+    a = arena.add_player("甲")
+    a.money = 10 ** 5
+    arena.buy(a.id, "smg")
+    arena.buy(a.id, "rifle")
+    assert a.slots["primary"] == "rifle"
+
+
+def test_secondary_slot_can_hold_second_gun(arena, clock):
+    a = arena.add_player("甲")
+    a.money = 10 ** 5
+    arena.buy(a.id, "smg")
+    arena.buy(a.id, "deagle")
+    assert a.slots == {"primary": "smg", "secondary": "deagle"}
+
+
+def test_equip_only_owned_slots(arena, clock):
+    a = arena.add_player("甲")
+    arena.equip(a.id, "primary")                 # 还没有主武器，切不过去
+    assert a.active == "secondary"
+    a.money = 10 ** 5
+    arena.buy(a.id, "smg")
+    arena.equip(a.id, "secondary")
+    assert a.active == "secondary"
+    arena.equip(a.id, "primary")
+    assert a.active == "primary"
+    arena.equip(a.id, "nonsense")
+    assert a.active == "primary"
+
+
+def test_weapon_damage_and_headshot_follow_the_weapon(arena, clock):
+    a, b = two_players(arena, clock)
+    a.money = 10 ** 5
+    arena.buy(a.id, "sniper")
+    a.pitch = math.atan2(1.0 - C.EYE_HEIGHT, 10.0)      # 打身体
+    arena.fire(a.id)
+    assert b.hp == 100 - C.WEAPONS["sniper"]["body"]
+    clock.t += C.WEAPONS["sniper"]["interval"] + 0.01
+    b.hp = 100
+    a.pitch = 0.0                                        # 打头
+    arena.fire(a.id)
+    assert b.hp == 0
+
+
+def test_weapon_fire_interval_is_per_weapon(arena, clock):
+    a, b = two_players(arena, clock)
+    a.money = 10 ** 5
+    arena.buy(a.id, "sniper")
+    arena.fire(a.id)
+    clock.t += C.WEAPONS["pistol"]["interval"] + 0.01    # 手枪的间隔够了，狙击枪还不行
+    arena.fire(a.id)
+    assert len([e for e in arena.take_events() if e["e"] == "shot"]) == 1
+
+
+def test_scope_only_for_zoom_weapons_and_closes_on_switch(arena, clock):
+    a = arena.add_player("甲")
+    arena.set_scope(a.id, True)
+    assert not a.scoped                                   # 手枪没有镜
+    a.money = 10 ** 5
+    arena.buy(a.id, "sniper")
+    arena.set_scope(a.id, True)
+    assert a.scoped
+    arena.equip(a.id, "secondary")
+    assert not a.scoped
+
+
+def test_scope_reduces_spread(arena, clock):
+    a, b = two_players(arena, clock)
+    a.money = 10 ** 5
+    arena.buy(a.id, "sniper")
+    arena.set_scope(a.id, True)
+    a.yaw = 0.0
+    a.pitch = 0.0
+    # 开镜时散布很小，打中正前方的人（距离 10 米、宽 0.8 米）几乎一定能中
+    hits = 0
+    for _ in range(20):
+        clock.t += C.WEAPONS["sniper"]["interval"] + 0.01
+        b.hp = 100
+        b.alive = True
+        arena.fire(a.id)
+        hits += 1 if b.hp < 100 else 0
+    assert hits >= 1
+
+
+def test_kill_pays_reward_and_death_resets_loadout(arena, clock):
+    a, b = two_players(arena, clock)
+    a.money = 5000
+    arena.buy(a.id, "rifle")
+    b.money = 1000
+    b.slots = {"primary": "smg", "secondary": "deagle"}
+    b.active = "primary"
+    a.pitch = 0.0                                         # 爆头，直接杀死
+    b.hp = 1
+    arena.fire(a.id)
+    assert b.deaths == 1 and not b.alive
+    assert b.slots == {"primary": None, "secondary": "pistol"} and b.active == "secondary"
+    assert b.money == 1000                                # 钱保留
+    assert a.money == 5000 - C.WEAPONS["rifle"]["price"] + C.KILL_REWARD
+
+
+def test_you_reports_money_and_loadout(arena, clock):
+    a = arena.add_player("甲")
+    data = arena.you(a.id)
+    assert data["money"] == C.START_MONEY
+    assert data["slots"]["secondary"] == "pistol" and data["active"] == "secondary"
+    assert data["scoped"] is False
