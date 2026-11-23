@@ -25,14 +25,15 @@
 | `app/persistence.py` | 通用的快照存档服务（按项目 slug 区分），项目可直接使用 |
 | `app/pages.py` | 返回 HTML 页面并给 js/css 加版本号 |
 | `static/` | 平台首页（应用商店、登录、我的账号） |
-| `projects/__init__.py` | **项目清单**：`PROJECTS` 列表，顺序 = 商店里卡片的顺序 |
+| `projects/__init__.py` | **自动发现项目**：扫描 `projects/` 下的每个目录，新增项目不用改它 |
 | `projects/<slug>/` | 各个项目：代码、`static/` 前端、`test_*.py` 测试、`REQUIREMENTS.md` 需求 |
 | `projects/lordwar/` | 项目一：多人实时策略游戏「领主战争」 |
 | `tests/` | 平台层的测试（账户、OAuth、首页、项目挂载） |
 | `conftest.py` | 所有测试共用的配置（临时数据库、测试客户端） |
 | `docs/requirements.md` | **平台**的需求与设计决定 |
+| `scripts/changes.py` | 按改动的文件选测试（`run`）、检查 PR 改动范围（`scope`） |
 | `scripts/wait_for_deploy.sh` | 等待 PR 合并进 `main`、Render 部署上线 |
-| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试，`pr-gate.yml` PR 审核规则，`ci-failure-limit.yml` CI 失败次数上限 |
+| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试和改动范围检查，`pr-gate.yml` PR 审核规则，`ci-failure-limit.yml` CI 失败次数上限 |
 | `deploy.conf` | 测试环境地址（非机密，正式来源；`README.md` 里有一份抄录） |
 
 ## 常用命令
@@ -40,8 +41,9 @@
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # 首次安装
 .venv/bin/uvicorn app.main:app --reload                                  # 本地运行 http://localhost:8000
+.venv/bin/python scripts/changes.py run                                 # 跑这次改动相关的测试（平时用这个）
 .venv/bin/python -m pytest -q                                            # 运行全部测试（平台 + 所有项目）
-.venv/bin/python -m pytest -q projects/lordwar                           # 只测某个项目
+.venv/bin/python -m pytest -q tests projects/lordwar                     # 平台测试 + 某个项目
 scripts/wait_for_deploy.sh                                               # 开 PR 后等待合并并部署上线
 ```
 
@@ -52,7 +54,9 @@ scripts/wait_for_deploy.sh                                               # 开 P
    - 某个项目内部（玩法、功能）→ `projects/<slug>/REQUIREMENTS.md`
    写清楚新增/修改/放弃了什么、做了什么设计决定、为什么。负责人在对话里提出的、会影响以后开发的需求，都要记进去，不能只留在聊天记录里。
 1. **改代码。**
-2. **本地测试**：运行 `.venv/bin/python -m pytest -q`，必须全部通过。
+2. **本地测试**：运行 `.venv/bin/python scripts/changes.py run`，必须全部通过。
+   - 它按改动自动选测试：只改了一个项目 → 平台测试 `tests/` + 这个项目的测试；改了平台代码（`app/`、`conftest.py`、依赖等）→ 全部测试。平台测试总要跑，因为所有项目在同一个进程里，一个项目坏了可能让整个网站起不来。CI 用的是同一个规则。
+   - 想全部跑一遍时用 `.venv/bin/python -m pytest -q`。
    - 新功能或修 bug 时补充对应测试：平台的放 `tests/`，项目的放 `projects/<slug>/test_*.py`。
    - 改了前端：本地启动服务器，在浏览器里实际操作一遍，确认没有 JS 报错。
 3. **在自己的分支上提交，开 PR 合并到 `main`**。不要直接 push 到 `main`，分支保护也会拒绝。
@@ -86,9 +90,8 @@ scripts/wait_for_deploy.sh                                               # 开 P
    - `static/index.html`：页面里的资源用**相对路径**（`static/xxx.js`），不要写 `/static/...`，那是平台首页的目录
    - `REQUIREMENTS.md`：这个项目的需求与设计决定
    - `test_*.py`：至少测试页面能打开、主要接口能用
-3. 在 `projects/__init__.py` 的 `PROJECTS` 列表里加上它。
-4. 在 `docs/requirements.md` 的「项目列表」里登记。
-5. 按开发流程测试、提交、部署。
+3. **不用在任何共享文件里登记**：`projects/__init__.py` 会自动发现新目录，目录名必须和 slug 一致（目录名里的 `_` 对应 slug 里的 `-`）。商店里的排序用 `Project(order=...)` 调整，默认 100，小的在前。
+4. 按开发流程测试、提交、部署。新建项目的 PR 只包含 `projects/<slug>/` 里的文件。
 
 项目可以使用平台提供的：
 - **账户**：HTTP 接口里用 `app.auth.require_user`；WebSocket 里先 `ws_same_origin(ws)`，再用 `lookup_session_user(ws.cookies.get(SESSION_COOKIE))`。页面里没登录时跳转到 `/?login=1&next=<当前路径>`。
@@ -99,6 +102,10 @@ scripts/wait_for_deploy.sh                                               # 开 P
 
 - **网址**：项目的所有页面和接口都在 `/apps/<slug>/` 下。平台保留 `/`、`/static/`、`/api/`、`/health`、`/version`。
 - **数据库**：项目自己的表名必须以 `<slug>_` 开头（例如 `lordwar_xxx`）；不要修改平台的表（`users`、`sessions` 等），需要用户信息时通过 `app.auth` 获取。
+- **一个 PR 只改一个范围**：要么只改一个项目（`projects/<slug>/` 里的文件），要么只改平台（其他所有文件）。CI 的 `scope` 检查会拦住混在一起的 PR。
+  - 原因：多个 agent 并行开发时，各改各的目录就不会冲突；PR 也更容易审核和回退。
+  - 项目需要平台提供新功能时：先开一个平台 PR，合并后再开项目 PR。
+  - 实在拆不开（例如平台接口变了，所有项目都要跟着改）：停下来告诉负责人，由负责人审核后用管理员权限合并。
 - **代码**：项目只能 import `app.*` 的公开工具和自己目录里的代码，**不要 import 其他项目的代码**。多个项目都需要的功能，提到 `app/` 里。
 - **稳定性**：所有项目在同一个进程里运行。一个项目的启动失败或死循环会影响整个网站，所以后台任务要捕获异常、不要阻塞事件循环；耗时的计算放进线程池。
 - **太重的项目**（例如需要大量内存或 GPU 的 AI 服务）可以单独部署成另一个服务，在 `PROJECTS` 里用 `external_url` 登记，商店卡片会直接跳过去。
@@ -123,11 +130,11 @@ scripts/wait_for_deploy.sh                                               # 开 P
 | 改动类型 | repo 里要同步更新的 | 🖐️ 需要负责人在外部操作的 |
 |---|---|---|
 | 平台需求（账户、首页、部署、跨项目约定） | `docs/requirements.md` | — |
-| 某个项目的需求 / 玩法 | `projects/<slug>/REQUIREMENTS.md`；变化较大时同步 `README.md` | — |
-| 新增 / 删除项目 | `projects/__init__.py`、`docs/requirements.md`「项目列表」、`README.md` | — |
+| 某个项目的需求 / 玩法 | `projects/<slug>/REQUIREMENTS.md` | — |
+| 新增 / 删除项目 | 只有 `projects/<slug>/` 目录本身（自动发现，不用登记） | — |
 | 项目名称 / 图标 / 分类 / 状态 | `projects/<slug>/__init__.py` 的 `PROJECT` | — |
 | 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要；`docs/requirements.md`「环境与部署」 | — |
-| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`.github/workflows/ci-failure-limit.yml`、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」也要跟着改 |
+| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`.github/workflows/ci-failure-limit.yml`、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」（现在是 `scope`、`test (3.9)`、`test (3.12)`）也要跟着改 |
 | 编码规范 | `AGENTS.md`「规范」；重要的同步到 `.github/copilot-instructions.md` | — |
 | 测试环境网址 | `deploy.conf`、`README.md`「环境与网址」 | Render 环境变量 `PUBLIC_BASE_URL`；已启用的 OAuth 在 Google/Apple/微信后台的回调地址 |
 | 换部署平台 / 服务器 | `deploy.conf`、`render.yaml`、`app/settings.py`（`IS_RENDER`、`GIT_COMMIT` 的来源）、`app/main.py` 里的 Render 判断、`AGENTS.md`「环境」、`README.md` | 新平台的环境变量；OAuth 回调地址 |
@@ -136,7 +143,7 @@ scripts/wait_for_deploy.sh                                               # 开 P
 | 数据库表结构 | `app/db.py`（平台）或项目自己的模块；见「规范 → 数据库」 | 已有表需要在 Neon 上执行迁移 |
 | 领主战争存档里的数据（`Game.to_dict` / `from_dict`） | 两个方法一起改；不兼容旧存档时把 `Game.SAVE_VERSION` +1，并在 `projects/lordwar/test_persistence.py` 补测试 | 部署后会开新世界，事先告诉负责人 |
 | 新增依赖 | `requirements.txt`（或 `requirements-dev.txt`），固定版本号 | — |
-| 新增 API / 前端操作 | 对应的测试；用户可见的操作写进项目的 `REQUIREMENTS.md` 或 `README.md` | — |
+| 新增 API / 前端操作 | 对应的测试；用户可见的操作写进项目的 `REQUIREMENTS.md`（平台的写进 `README.md`） | — |
 
 ## 规范
 

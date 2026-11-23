@@ -11,7 +11,8 @@ description: 把已提交的改动 push 到自己的分支并开 PR 到 main，�
 
 1. **确认没有遗漏**
    - `git status --short`：有没有该提交却没提交的文件？有没有不该提交的文件（`.env`、`*.db`）？
-   - `.venv/bin/python -m pytest -q`：如果上次运行测试之后又改过代码，就再运行一次。
+   - `.venv/bin/python scripts/changes.py run`：如果上次运行测试之后又改过代码，就再运行一次。
+   - `python3 scripts/changes.py scope`：确认这个 PR 只改了一个项目，或者只改了平台。
 
 2. **push 到自己的分支并开 PR**（不要直接 push 到 `main`）
    ```bash

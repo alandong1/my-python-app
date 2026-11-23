@@ -2,7 +2,7 @@
 
 平台根据这些信息：在首页「应用商店」显示卡片、把项目的路由挂到 /apps/<slug>/、
 启动和关闭服务器时调用项目的 startup / shutdown。
-新项目怎么接入，见 AGENTS.md 的「新建项目」。
+新项目怎么接入，见 AGENTS.md 的「新建项目」。项目由 projects/__init__.py 自动发现。
 """
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ class Project:
     shutdown: Optional[Callable[[], Awaitable[None]]] = None
     health: Optional[Callable[[], dict]] = None   # 给 /health 汇总用
     external_url: Optional[str] = None            # 单独部署的项目：卡片直接跳到这个网址
+    order: int = 100                              # 商店里的排序：小的在前，相同按 slug
 
     def __post_init__(self):
         if not SLUG_RE.fullmatch(self.slug):

@@ -5,10 +5,8 @@
 
 ## 项目
 
-| 项目 | 网址 | 说明 |
-|---|---|---|
-| ⚔️ 领主战争 | `/apps/lordwar/` | 多人实时策略游戏：随机地图、领地拓展、建筑与兵种、野怪、战争迷雾、攻城。需求见 [projects/lordwar/REQUIREMENTS.md](projects/lordwar/REQUIREMENTS.md) |
-| 🐍 贪吃蛇 | `/apps/snake/` | 经典贪吃蛇，电脑和手机都能玩，不需要登录。需求见 [projects/snake/REQUIREMENTS.md](projects/snake/REQUIREMENTS.md) |
+每个项目是 [`projects/`](projects/) 下的一个目录，网址是 `/apps/<目录名>/`，需求文档是目录里的 `REQUIREMENTS.md`。
+平台启动时自动发现所有项目，打开网站首页的应用商店就能看到完整列表。
 
 ## 账户
 
@@ -44,6 +42,7 @@ cp .env.example .env        # 按需填写，全部留空也能运行
 平台需求与设计决定见 [docs/requirements.md](docs/requirements.md)。
 
 ```bash
+.venv/bin/python scripts/changes.py run   # 跑这次改动相关的测试
 .venv/bin/python -m pytest -q          # 运行全部测试
 scripts/wait_for_deploy.sh             # 开 PR 后等待合并进 main、Render 部署上线
 ```
