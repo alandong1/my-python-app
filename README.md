@@ -15,6 +15,17 @@
 - **用户名 + 密码**注册登录，可选绑定邮箱（需点验证链接）
 - **第三方登录**：Google / Apple / 微信，配置了对应密钥才会显示
 
+## 环境与网址（参考）
+
+| | 网址 | 说明 |
+|---|---|---|
+| 🌐 测试环境网站 | https://my-python-app-m3qj.onrender.com | 正式来源是 [`deploy.conf`](deploy.conf) 的 `DEPLOY_URL`，两处要保持一致 |
+| 🚀 Render 控制台（部署） | https://dashboard.render.com | 登录后选服务 `my-python-app`：**Events** 看部署记录，**Logs** 看运行日志，**Environment** 填环境变量和密钥 |
+| 🗄️ Neon 控制台（数据库） | https://console.neon.tech | 登录后选项目（区域 us-east-2）：**Tables** 看数据，**SQL Editor** 执行 SQL（如迁移），**Connect** 获取连接字符串 |
+
+- 数据库连接字符串里有密码，**不写进仓库**：本地放 `.env` 的 `DATABASE_URL`，线上放 Render 的 Environment。
+- 两个控制台都要用负责人自己的账号登录，AI 助手无法操作。
+
 ## 本地运行
 
 ```bash

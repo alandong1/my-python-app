@@ -32,7 +32,7 @@
 | `conftest.py` | 所有测试共用的配置（临时数据库、测试客户端） |
 | `docs/requirements.md` | **平台**的需求与设计决定 |
 | `scripts/wait_for_deploy.sh` | push 后等待 Render 部署上线 |
-| `deploy.conf` | 测试环境地址（非机密，唯一来源） |
+| `deploy.conf` | 测试环境地址（非机密，正式来源；`README.md` 里有一份抄录） |
 
 ## 常用命令
 
@@ -93,7 +93,7 @@ scripts/wait_for_deploy.sh                                               # push 
 
 | | 本地开发 | 远程测试环境 |
 |---|---|---|
-| 地址 | http://localhost:8000 | 见 `deploy.conf` 的 `DEPLOY_URL`（唯一来源） |
+| 地址 | http://localhost:8000 | 见 `deploy.conf` 的 `DEPLOY_URL`（正式来源；`README.md` 里抄了一份供人查看，改网址时两处一起改） |
 | 数据库 | 未设置 `DATABASE_URL` 时用 SQLite `dev.db` | Neon PostgreSQL（us-east-2） |
 | 部署 | — | push 到 `main` 后 Render 自动部署（约 1–5 分钟） |
 
@@ -114,7 +114,7 @@ scripts/wait_for_deploy.sh                                               # push 
 | 项目名称 / 图标 / 分类 / 状态 | `projects/<slug>/__init__.py` 的 `PROJECT` | — |
 | 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要 | — |
 | 编码规范 | `AGENTS.md`「规范」；重要的同步到 `.github/copilot-instructions.md` | — |
-| 测试环境网址 | `deploy.conf` | Render 环境变量 `PUBLIC_BASE_URL`；已启用的 OAuth 在 Google/Apple/微信后台的回调地址 |
+| 测试环境网址 | `deploy.conf`、`README.md`「环境与网址」 | Render 环境变量 `PUBLIC_BASE_URL`；已启用的 OAuth 在 Google/Apple/微信后台的回调地址 |
 | 换部署平台 / 服务器 | `deploy.conf`、`render.yaml`、`app/settings.py`（`IS_RENDER`、`GIT_COMMIT` 的来源）、`app/main.py` 里的 Render 判断、`AGENTS.md`「环境」、`README.md` | 新平台的环境变量；OAuth 回调地址 |
 | 换数据库 | `AGENTS.md`「环境」、`.env.example` | 新平台上的 `DATABASE_URL`；负责人本地 `.env` |
 | 新增 / 删除环境变量 | `app/settings.py`、`.env.example`；线上也需要的加进 `render.yaml` | Render 上填写实际值 |
