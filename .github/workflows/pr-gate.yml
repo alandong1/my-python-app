@@ -1,0 +1,41 @@
+# PR 审核规则（见 docs/requirements.md「开发流程」）：
+#   - PR 作者是仓库负责人本人（包括负责人指挥的 AI 用负责人账号开的 PR）
+#       → 自动 approve，并开启「测试通过后自动合并」
+#   - 其他人开的 PR（不管是不是 AI 写的）
+#       → 这里什么都不做，必须由负责人人工审核 approve
+#
+# 安全说明：
+#   - 用 pull_request_target：运行的是 main 上的这个文件，而不是 PR 里的版本，
+#     所以别人没法在 PR 里改掉这个规则给自己放行。
+#   - 这个 workflow 不 checkout、不运行 PR 里的任何代码，只调用 GitHub API。
+#   - PR 作者由 GitHub 记录，不能伪造。
+name: PR gate
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write        # 自动合并需要
+  pull-requests: write   # approve 需要
+
+jobs:
+  auto-approve-owner:
+    if: >-
+      github.event.pull_request.user.login == github.repository_owner &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Approve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.html_url }}
+        run: gh pr review "$PR" --approve --body "负责人本人的 PR，按规则自动 approve。测试通过后自动合并。"
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.html_url }}
+        # 用 merge commit（不 squash）：分支上的提交原样进入 main，
+        # scripts/wait_for_deploy.sh 才能判断「我的提交是否已合并」
+        run: gh pr merge "$PR" --auto --merge
