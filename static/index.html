@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>领主战争</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="login">
+    <div class="login-box">
+      <h1>⚔️ 领主战争</h1>
+      <p>建立你的王国，拓展领土，征服野怪和其他领主。</p>
+      <input id="name" maxlength="12" placeholder="你的领主名" autocomplete="off">
+      <button id="joinBtn">进入世界</button>
+      <button id="newBtn" class="link">换个新身份</button>
+    </div>
+  </div>
+
+  <div id="game" hidden>
+    <header id="topbar">
+      <span class="res">💰 <b id="gold">0</b> <small id="goldInc"></small></span>
+      <span class="res">🪵 <b id="wood">0</b> <small id="woodInc"></small></span>
+      <span class="res">🗺️ <b id="tileCount">0</b></span>
+      <span class="spacer"></span>
+      <button id="homeBtn" title="回到主城 (H)">🏰 主城</button>
+      <span id="conn" class="dot"></span>
+    </header>
+    <main>
+      <div id="mapWrap">
+        <canvas id="map"></canvas>
+        <div id="hint"></div>
+        <div id="dead" hidden>
+          <h2>💀 你的主城已陷落</h2>
+          <button id="respawnBtn">重新开始</button>
+        </div>
+      </div>
+      <aside id="side">
+        <section id="tilePanel"><p class="muted">点击地图上的格子查看详情</p></section>
+        <section>
+          <h3>⚔️ 兵营 <small id="barracksLv"></small></h3>
+          <div id="trainPanel"></div>
+          <div id="queue"></div>
+        </section>
+        <section>
+          <h3>🔨 铁匠铺 <small id="smithyLv"></small></h3>
+          <div id="researchPanel"></div>
+        </section>
+        <section>
+          <h3>🏆 排行榜</h3>
+          <div id="board"></div>
+        </section>
+        <section>
+          <h3>📜 战报</h3>
+          <div id="log"></div>
+        </section>
+        <section class="help">
+          <b>操作：</b>拖动平移，滚轮缩放，WASD 移动视角。<br>
+          点击己方部队后<b>右键</b>目标格进军，<b>Shift+右键</b>派出一半。<br>
+          虚线框的格子可以花金币拓展。
+        </section>
+      </aside>
+    </main>
+  </div>
+  <div id="toast"></div>
+  <script src="/static/game.js"></script>
+</body>
+</html>
