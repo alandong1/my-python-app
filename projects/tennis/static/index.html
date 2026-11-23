@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>网球 · Dev Lab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎾</text></svg>">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header id="top">
+    <a href="/" class="home" title="返回 Dev Lab">🏠</a>
+    <span class="title">🎾 网球</span>
+    <span class="spacer"></span>
+    <span id="who"></span>
+    <span id="conn" class="dot" title="连接状态"></span>
+  </header>
+
+  <main id="lobby" class="page">
+    <div class="bar">
+      <h2>房间大厅</h2>
+      <button id="createBtn" class="primary">＋ 建房</button>
+    </div>
+    <p id="guestNote" class="note" hidden>你是游客：可以加入别人的房间，但不能建房。注册账号后就能建房。</p>
+    <div id="rooms" class="rooms"></div>
+    <p id="emptyRooms" class="muted" hidden>暂时没有房间。注册用户可以点「建房」，先到先得，其他人都能看到。</p>
+  </main>
+
+  <main id="roomView" class="page" hidden>
+    <div class="card">
+      <h2 id="roomTitle"></h2>
+      <p id="roomMeta" class="muted"></p>
+      <div id="seats" class="seats"></div>
+      <p id="roomHint" class="muted"></p>
+      <div class="row">
+        <button id="startBtn" class="primary" hidden>开始比赛</button>
+        <button id="leaveBtn">离开房间</button>
+      </div>
+    </div>
+  </main>
+
+  <section id="game" hidden>
+    <div id="view"></div>
+    <div id="scoreBoard"></div>
+    <div id="hudMsg"></div>
+    <div id="hint" class="hint">摇杆移动 · 右边选球种后击球 · 击球时摇杆的左右、前后决定落点</div>
+
+    <div id="joy" aria-label="摇杆"><div id="knob"></div></div>
+
+    <div id="strokes">
+      <button data-stroke="flat">平击<kbd>1</kbd></button>
+      <button data-stroke="top">上旋<kbd>2</kbd></button>
+      <button data-stroke="back">下旋<kbd>3</kbd></button>
+      <button data-stroke="side_l">侧旋←<kbd>4</kbd></button>
+      <button data-stroke="side_r">侧旋→<kbd>5</kbd></button>
+    </div>
+    <button id="hitBtn">击球<kbd>空格</kbd></button>
+    <button id="exitBtn">离开</button>
+
+    <div id="over" hidden>
+      <div class="card">
+        <h2 id="overTitle"></h2>
+        <p id="overText" class="muted"></p>
+        <div class="row">
+          <button id="againBtn" class="primary" hidden>再打一局</button>
+          <button id="overLeaveBtn">返回大厅</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="dlg" hidden>
+    <form id="createForm" class="card">
+      <h2>建房</h2>
+      <label>房间名<input id="roomName" maxlength="20" placeholder="比如：周末来一局"></label>
+      <label>比赛方式</label>
+      <div class="modes">
+        <label><input type="radio" name="mode" value="single" checked> 单打（2 人）</label>
+        <label><input type="radio" name="mode" value="double"> 双打（4 人）</label>
+      </div>
+      <div class="row">
+        <button type="submit" class="primary">建房</button>
+        <button type="button" id="dlgCancel">取消</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="toast"></div>
+  <script type="module" src="static/main.js"></script>
+</body>
+</html>
