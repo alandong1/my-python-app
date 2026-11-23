@@ -8,6 +8,7 @@
 | 项目 | 网址 | 说明 |
 |---|---|---|
 | ⚔️ 领主战争 | `/apps/lordwar/` | 多人实时策略游戏：随机地图、领地拓展、建筑与兵种、野怪、战争迷雾、攻城。需求见 [projects/lordwar/REQUIREMENTS.md](projects/lordwar/REQUIREMENTS.md) |
+| 🐍 贪吃蛇 | `/apps/snake/` | 经典贪吃蛇，电脑和手机都能玩，不需要登录。需求见 [projects/snake/REQUIREMENTS.md](projects/snake/REQUIREMENTS.md) |
 
 ## 账户
 

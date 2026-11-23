@@ -7,9 +7,11 @@ from typing import List
 from app.registry import Project
 
 from .lordwar import PROJECT as LORDWAR
+from .snake import PROJECT as SNAKE
 
 PROJECTS: List[Project] = [
     LORDWAR,
+    SNAKE,
 ]
 
 _slugs = [p.slug for p in PROJECTS]
