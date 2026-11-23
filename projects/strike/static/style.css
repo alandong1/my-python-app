@@ -147,14 +147,41 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   border-radius: 50%; background: rgba(255,255,255,.45);
 }
 
-#rotateHint {
-  /* 层级低于进入界面（z 20），且不接收点击：竖屏时菜单照常能点，游戏里提示也不挡操作 */
-  position: fixed; inset: 0; z-index: 15; display: none; align-items: center; justify-content: center;
-  background: rgba(0,0,0,.85); font-size: 18px; pointer-events: none;
+/* 武器和狙击镜 */
+#weaponName {
+  position: absolute; right: 22px; bottom: calc(122px + env(safe-area-inset-bottom));
+  font-size: 13px; font-weight: 700; text-shadow: 0 1px 3px #000;
 }
-@media (orientation: portrait) and (pointer: coarse) {
-  #rotateHint { display: flex; }
+#swapBtn { position: absolute; right: 126px; bottom: calc(64px + env(safe-area-inset-bottom)); }
+#scopeBtn { position: absolute; right: 126px; bottom: calc(16px + env(safe-area-inset-bottom)); }
+/* 狙击镜：中间透明的圆，外面是黑色，中间有十字线 */
+#scopeOverlay {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle at center, transparent 0, transparent 38vmin, rgba(0,0,0,.97) 40vmin);
 }
+#scopeOverlay::before, #scopeOverlay::after { content: ""; position: absolute; background: rgba(0,0,0,.85); }
+#scopeOverlay::before { left: 0; right: 0; top: 50%; height: 1px; }
+#scopeOverlay::after { top: 0; bottom: 0; left: 50%; width: 1px; }
+
+/* 商店 */
+#shop {
+  position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(5, 8, 12, .6);
+}
+.shop-card {
+  width: min(440px, 100%); max-height: 100%; overflow-y: auto; background: var(--panel);
+  border-radius: 14px; padding: 16px; border: 1px solid rgba(255,255,255,.12);
+}
+.shop-head { display: flex; align-items: center; gap: 10px; font-size: 18px; }
+.shop-head b { flex: 1; }
+#shopMoney { color: var(--accent); font-weight: 700; }
+.shop-note { color: var(--danger); min-height: 1.2em; font-size: 13px; margin: 6px 0; }
+.shop-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.1); }
+.shop-name { flex: 1; font-size: 15px; }
+.shop-name small { display: block; color: var(--muted); font-size: 12px; }
+.shop-row .price { color: var(--accent); min-width: 64px; text-align: right; }
+.shop-row button:disabled { opacity: .4; cursor: default; }
+.shop-help { color: var(--muted); font-size: 12px; line-height: 1.5; }
 
 /* 进入界面 */
 #menu {

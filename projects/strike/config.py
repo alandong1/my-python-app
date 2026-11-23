@@ -15,11 +15,29 @@ MAX_PITCH = 1.5            # 抬头 / 低头的最大角度（弧度，约 86 �
 MAX_INPUT_BUDGET = 0.25    # 移动时间预算的上限（秒）：防止客户端疯狂发消息加速
 
 MAX_HP = 100
-BODY_DAMAGE = 25           # 身体中弹伤害
-HEAD_DAMAGE = 100          # 爆头伤害（即秒杀）
-FIRE_INTERVAL = 0.12       # 两次开火的最短间隔（秒），约每秒 8 发
 MAX_RANGE = 120.0          # 子弹最远射程（米）
 RESPAWN_SECONDS = 3.0      # 死亡后多少秒复活
+
+# 武器表。每把武器：slot 是槽位（primary 主武器 / secondary 副武器），price 是价格（0 = 免费，只有默认手枪）。
+#   body / head：身体 / 爆头伤害；interval：两次开火的最短间隔（秒）；spread：不瞄准时的散布（弧度）；
+#   zoom：狙击镜倍数（0 = 没有狙击镜）。开镜时散布缩小到十分之一。
+# 弹药是无限的（见 REQUIREMENTS.md）。
+WEAPONS = {
+    "pistol": {"name": "手枪", "slot": "secondary", "price": 0, "body": 25, "head": 100,
+               "interval": 0.3, "spread": 0.0, "zoom": 0},
+    "deagle": {"name": "沙漠之鹰", "slot": "secondary", "price": 700, "body": 45, "head": 100,
+               "interval": 0.45, "spread": 0.005, "zoom": 0},
+    "smg": {"name": "冲锋枪", "slot": "primary", "price": 1200, "body": 16, "head": 40,
+            "interval": 0.08, "spread": 0.03, "zoom": 0},
+    "rifle": {"name": "突击步枪", "slot": "primary", "price": 2700, "body": 30, "head": 100,
+              "interval": 0.11, "spread": 0.012, "zoom": 0},
+    "sniper": {"name": "狙击枪", "slot": "primary", "price": 4750, "body": 95, "head": 200,
+               "interval": 1.2, "spread": 0.03, "zoom": 3.5},
+}
+DEFAULT_WEAPON = "pistol"
+START_MONEY = 800          # 进入房间时的钱
+KILL_REWARD = 300          # 击杀奖励
+MAX_MONEY = 16000
 
 TICK_SECONDS = 0.05        # 服务器每隔多久广播一次状态（20 次 / 秒）
 MAX_PLAYERS = 12           # 房间人数上限
