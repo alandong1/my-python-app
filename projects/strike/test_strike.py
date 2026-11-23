@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
+from projects.strike import config as C
 from projects.strike import server
 
 HERE = Path(__file__).resolve().parent
@@ -58,7 +59,8 @@ def test_store_lists_strike_without_login(client):
 
 
 def test_health_reports_players(client):
-    assert client.get("/health").json()["projects"]["strike"] == {"players": 0, "max": 12}
+    info = client.get("/health").json()["projects"]["strike"]
+    assert info["humans"] == 0 and info["players"] == C.MIN_ONLINE and info["max"] == 12
 
 
 def test_script_strings_are_translated():
@@ -102,7 +104,7 @@ def test_two_players_see_each_other_and_shots_are_broadcast(client):
         b.send_json({"t": "join", "name": "乙"})
         idb = b.receive_json()["id"]
         state = receive_until(b, "state")
-        names = {p["id"]: p["name"] for p in state["players"]}
+        names = {p["id"]: p["name"] for p in state["players"] if not p["name"].startswith("电脑")}
         assert names == {ida: "甲", idb: "乙"}
 
         # 甲开火：乙会收到这一发的子弹轨迹（对方没有挡住时也会显示）
@@ -115,11 +117,14 @@ def test_two_players_see_each_other_and_shots_are_broadcast(client):
             raise AssertionError("乙没有收到甲的射击事件")
 
 
-def test_leaving_removes_player(client):
+def test_leaving_removes_player_and_bots_refill(client):
     with client.websocket_connect("/apps/strike/ws") as a:
         a.send_json({"t": "join", "name": "甲"})
         a.receive_json()
-    assert len(server.arena.players) == 0
+        assert server.arena.human_count() == 1
+        assert len(server.arena.players) == C.MIN_ONLINE       # 一个人 + 七台电脑
+    assert server.arena.human_count() == 0
+    assert len(server.arena.players) == C.MIN_ONLINE           # 人走了，电脑补回来
 
 
 def test_bad_first_message_is_rejected(client):

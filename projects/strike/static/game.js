@@ -33,6 +33,10 @@ let playing = false;           // 已经进入房间
 let arenaBuilt = false;
 let wasAlive = false;          // 上一次收到的状态里，自己是否活着（用来判断刚出生或刚复活）
 let shopOpen = false;          // 商店是否打开（打开时不能移动和开火）
+let teamKills = [0, 0];        // 红队、蓝队的击杀数（服务器发来）
+let myTeam = 0;                // 我在哪一队：0 红队，1 蓝队
+const TEAM_COLORS = [0xe4572e, 0x3e92cc];   // 红队、蓝队的颜色
+const TEAM_CSS = ["#ff7a5c", "#6fb8ff"];    // 同样的颜色，用在文字上
 let scopeWanted = false;       // 玩家想不想开狙击镜
 let curFov = BASE_FOV;         // 当前视野（开镜时会慢慢拉近）
 
@@ -537,7 +541,7 @@ function makeRemote(p) {
   root.rotation.y = Math.PI;             // 模型默认朝 +z，转到朝 -z（游戏里的前方）
   root.scale.setScalar(manScale);
   root.position.y = manOffsetY;
-  const tint = new THREE.Color(COLORS[p.id % COLORS.length]);
+  const tint = new THREE.Color(TEAM_COLORS[p.team] ?? 0xffffff);
   root.traverse((o) => {
     if (o.isMesh) {
       o.castShadow = true;
@@ -562,7 +566,7 @@ function makeRemote(p) {
 
 function makeRemoteCapsule(p) {
   const group = new THREE.Group();
-  const suit = new THREE.MeshStandardMaterial({ color: COLORS[p.id % COLORS.length], roughness: 0.7 });
+  const suit = new THREE.MeshStandardMaterial({ color: TEAM_COLORS[p.team] ?? 0xffffff, roughness: 0.7 });
   const pants = new THREE.MeshStandardMaterial({ color: 0x3a3f2e, roughness: 0.9 });
   const boots = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
   group.add(
@@ -981,6 +985,7 @@ function onState(msg) {
     me.hp = you.hp; me.alive = you.alive; me.respawnIn = you.respawn_in;
     me.kills = you.kills; me.deaths = you.deaths;
     me.money = you.money; me.slots = you.slots; me.active = you.active;
+    myTeam = you.team ?? 0;
     if (you.alive) {
       // 以服务器的位置为准，再把还没被确认的输入重放一遍，得到当前应该在的位置
       pending = pending.filter((p) => p.seq > you.ack);
@@ -1017,6 +1022,7 @@ function onState(msg) {
       addFeed(ev);
     }
   }
+  if (msg.teams) teamKills = msg.teams;
   if (shopOpen) renderShop();
   updateHud();
 }
@@ -1049,6 +1055,8 @@ function updateHud() {
   $("kills").textContent = me.kills;
   $("deaths").textContent = me.deaths;
   $("money").textContent = "$" + me.money;
+  $("teamScores").innerHTML = `<b style="color:${TEAM_CSS[0]}">${tr("红队")} ${teamKills[0]}</b> : <b style="color:${TEAM_CSS[1]}">${teamKills[1]} ${tr("蓝队")}</b>` +
+    ` <small style="color:var(--muted)">${tr("我在")}${tr(myTeam === 0 ? "红队" : "蓝队")}</small>`;
   const pct = clamp(me.hp / sim.maxHp, 0, 1) * 100;
   $("hpfill").style.width = pct + "%";
   $("hpfill").style.background = pct > 35 ? "var(--ok)" : "var(--danger)";

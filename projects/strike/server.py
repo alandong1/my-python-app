@@ -11,7 +11,7 @@
     {"t":"scope","on":true}                                            开 / 关狙击镜
   服务器 → 浏览器
     {"t":"welcome","id":1,"map":{...},"sim":{...}}                     进入房间时发一次
-    {"t":"state","you":{...},"players":[...],"events":[...]}            每 0.05 秒一次
+    {"t":"state","you":{...},"players":[...],"events":[...],"teams":[红队击杀,蓝队击杀]}   每 0.05 秒一次
     {"t":"error","text":"..."}
 """
 from __future__ import annotations
@@ -80,11 +80,12 @@ async def ws_endpoint(ws: WebSocket):
             await ws.send_json({"t": "error", "text": "第一条消息必须是 join"})
             await ws.close(code=4400)
             return
-        if len(arena.players) >= C.MAX_PLAYERS:
+        if arena.human_count() >= C.MAX_PLAYERS:
             await ws.send_json({"t": "error", "text": "房间已满，请稍后再来"})
             await ws.close(code=4409)
             return
         player = arena.add_player(_clean_name(hello.get("name")))
+        arena.balance_bots()          # 有人加入：踢掉相应数量的电脑，保持总人数
         pid = player.id
         # 先发欢迎消息，再加入广播名单，保证浏览器总是先收到地图再收到状态
         await ws.send_json({"t": "welcome", "id": pid, "map": MAP, "sim": SIM})
@@ -130,6 +131,7 @@ async def ws_endpoint(ws: WebSocket):
         clients.pop(ws, None)
         if pid is not None:
             arena.remove_player(pid)
+            arena.balance_bots()      # 有人离开：补回电脑，保持总人数
             log.info("玩家离开（%d 人在线）", len(arena.players))
 
 
@@ -144,7 +146,8 @@ async def game_loop():
                 continue
             players = arena.roster()
             for ws, pid in list(clients.items()):
-                msg = {"t": "state", "you": arena.you(pid), "players": players, "events": events}
+                msg = {"t": "state", "you": arena.you(pid), "players": players, "events": events,
+                       "teams": arena.team_kills}
                 try:
                     await ws.send_json(msg)
                 except Exception:
@@ -155,6 +158,7 @@ async def game_loop():
 
 async def startup():
     global _loop_task
+    arena.balance_bots()          # 房间刚启动时，先放上电脑玩家
     _loop_task = asyncio.create_task(game_loop())
 
 
@@ -172,4 +176,4 @@ async def shutdown():
 
 
 def health() -> dict:
-    return {"players": len(arena.players), "max": C.MAX_PLAYERS}
+    return {"players": len(arena.players), "humans": arena.human_count(), "max": C.MAX_PLAYERS}
