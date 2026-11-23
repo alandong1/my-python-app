@@ -2,15 +2,17 @@
 import * as THREE from 'three';
 
 const $ = (id) => document.getElementById(id);
+const DEEP = 0, SHALLOW = 1, SAND = 2, GRASS = 3, FOREST = 4;
 const TERRAIN_H = [-0.8, -0.3, 0.05, 0.25, 0.3];                       // 深海 浅海 沙滩 草地 森林
-const TERRAIN_C = ['#1e4d7a', '#4fa3c7', '#e8d59a', '#6fae4d', '#3d7a3a'];
+const TERRAIN_C = ['#1d4a72', '#3f93bd', '#e3cf93', '#6aa347', '#3a7535'];
 const ROLE_COLOR = { chef: 0xe07b39, doctor: 0xf2f2f2, priest: 0x7a5cc4 };
+const HORIZON = '#cfe6f2';
 // 远端玩家和动物按「过去 100 毫秒」的画面显示：服务器每 0.1 秒发一次，网络有快有慢，
 // 延迟 100 毫秒后就有两个快照可以匀速插值，画面不会一顿一顿。（和 strike 的做法相同）
 const INTERP_MS = 100;
 
-let ws = null, role = null, myId = null, info = null, latest = null;
-let scene, camera, renderer, me = null;
+let ws = null, role = null, myId = null, info = null;
+let scene, camera, renderer, sun, hemi, water, waterBase = null, me = null;
 let yaw = Math.PI, dragging = false, lastX = 0;
 const players = new Map(), animals = new Map(), fires = new Map(), trees = new Map();
 const keys = new Set();
@@ -52,7 +54,6 @@ function onMessage(msg) {
     info = msg.info; myId = msg.id;
     startGame(msg.state);
   } else if (msg.type === 'state') {
-    latest = msg;
     applyState(msg);
   } else if (msg.type === 'error') {
     toast(msg.text);
@@ -83,6 +84,7 @@ function startGame(state) {
   if (!scene) {
     initScene();
     buildTerrain();
+    buildDecor();
     setupInput();
     requestAnimationFrame(frame);
     sendMove();
@@ -94,47 +96,86 @@ function startGame(state) {
 function initScene() {
   renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 让高光和阴影的过渡更像真实相机
+  renderer.toneMappingExposure = 1.0;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
   scene = new THREE.Scene();
-  scene.background = new THREE.Color('#9fd3ec');
-  scene.fog = new THREE.Fog('#9fd3ec', 45, 110);
-  camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.0));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-  sun.position.set(60, 90, 30);
-  scene.add(sun);
+  scene.fog = new THREE.Fog(HORIZON, 70, 190);
+  camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
+  scene.add(makeSky());
+
+  // 天光（从四面八方来的柔和光）+ 太阳（会投影的主光）
+  hemi = new THREE.HemisphereLight('#cfe6ff', '#4a5a3a', 1.0);
+  scene.add(hemi);
+  sun = new THREE.DirectionalLight('#ffe6bd', 2.2);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 260 });
+  sun.shadow.bias = -0.0008;
+  sun.shadow.normalBias = 0.03;
+  scene.add(sun, sun.target);
+
   resize();
   window.addEventListener('resize', resize);
 
-  // 海面（半透明）
-  const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(info.w * 3, info.h * 3),
-    new THREE.MeshStandardMaterial({ color: '#3a8fc2', transparent: true, opacity: 0.7 }));
-  water.rotation.x = -Math.PI / 2;
-  water.position.set(info.w / 2, 0, info.h / 2);
+  // 海面：半透明，表面有缓慢起伏的波浪
+  const waterGeo = new THREE.PlaneGeometry(info.w * 2, info.h * 2, 120, 120);
+  waterGeo.rotateX(-Math.PI / 2);
+  waterGeo.translate(info.w / 2, 0, info.h / 2);
+  waterBase = Float32Array.from(waterGeo.attributes.position.array);
+  water = new THREE.Mesh(waterGeo, new THREE.MeshStandardMaterial({
+    color: '#2b78a8', roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.85,
+  }));
+  water.receiveShadow = true;
   scene.add(water);
 
   // 共用的几何体和材质，省内存
-  shared.trunk = new THREE.CylinderGeometry(0.12, 0.18, 1.3, 6);
-  shared.brown = new THREE.MeshLambertMaterial({ color: '#7a5233' });
-  shared.leaf = new THREE.ConeGeometry(0.75, 1.9, 7);
-  shared.leafMat = new THREE.MeshLambertMaterial({ color: '#2e7d32' });
-  shared.bush = new THREE.SphereGeometry(0.5, 8, 6);
-  shared.bushMat = new THREE.MeshLambertMaterial({ color: '#3f7d2c' });
-  shared.berry = new THREE.SphereGeometry(0.08, 6, 4);
-  shared.berryMat = new THREE.MeshLambertMaterial({ color: '#c0392b' });
+  shared.trunk = new THREE.CylinderGeometry(0.1, 0.17, 1.5, 7);
+  shared.trunkMat = new THREE.MeshStandardMaterial({ color: '#6b4a2e', roughness: 0.95 });
+  shared.cone1 = new THREE.ConeGeometry(0.95, 1.8, 8);
+  shared.cone2 = new THREE.ConeGeometry(0.65, 1.4, 8);
+  shared.leafMats = ['#2d6a2e', '#35773a', '#2a5e33'].map((c) =>
+    new THREE.MeshStandardMaterial({ color: c, roughness: 0.85 }));
+  shared.bush = new THREE.SphereGeometry(0.5, 10, 8);
+  shared.bushMat = new THREE.MeshStandardMaterial({ color: '#3d7a2c', roughness: 0.9 });
+  shared.berry = new THREE.SphereGeometry(0.08, 8, 6);
+  shared.berryMat = new THREE.MeshStandardMaterial({ color: '#c0392b', roughness: 0.4 });
   shared.herb = new THREE.ConeGeometry(0.1, 0.5, 5);
-  shared.herbMat = new THREE.MeshLambertMaterial({ color: '#9ccc65' });
-  shared.body = new THREE.CylinderGeometry(0.25, 0.25, 0.9, 10);
-  shared.head = new THREE.SphereGeometry(0.22, 10, 8);
-  shared.skin = new THREE.MeshLambertMaterial({ color: '#f1c9a5' });
-  shared.rabbit = new THREE.SphereGeometry(0.25, 8, 6);
-  shared.rabbitMat = new THREE.MeshLambertMaterial({ color: '#c9b49a' });
-  shared.crab = new THREE.SphereGeometry(0.22, 8, 6);
-  shared.crabMat = new THREE.MeshLambertMaterial({ color: '#d9573a' });
+  shared.herbMat = new THREE.MeshStandardMaterial({ color: '#9ccc65', roughness: 0.8 });
+  shared.body = new THREE.CylinderGeometry(0.25, 0.25, 0.9, 12);
+  shared.head = new THREE.SphereGeometry(0.22, 12, 10);
+  shared.skin = new THREE.MeshStandardMaterial({ color: '#f1c9a5', roughness: 0.7 });
+  shared.rabbit = new THREE.SphereGeometry(0.25, 10, 8);
+  shared.rabbitMat = new THREE.MeshStandardMaterial({ color: '#c9b49a', roughness: 0.9 });
+  shared.crab = new THREE.SphereGeometry(0.22, 10, 8);
+  shared.crabMat = new THREE.MeshStandardMaterial({ color: '#d9573a', roughness: 0.6 });
   shared.flame = new THREE.ConeGeometry(0.2, 0.6, 6);
-  shared.flameMat = new THREE.MeshBasicMaterial({ color: '#ff8a1f' });
-  shared.ring = new THREE.RingGeometry(0.4, 0.5, 20);
+  shared.flameMat = new THREE.MeshBasicMaterial({ color: '#ff9a2e' });
+  shared.ring = new THREE.RingGeometry(0.4, 0.5, 24);
   shared.ringMat = new THREE.MeshBasicMaterial({ color: '#ffe066', side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+  shared.tuft = new THREE.ConeGeometry(0.07, 0.28, 4);
+  shared.tuftMat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+  shared.rock = new THREE.DodecahedronGeometry(0.22, 0);
+  shared.rockMat = new THREE.MeshStandardMaterial({ color: '#9a9488', roughness: 0.95, flatShading: true });
+}
+
+// 天空：从地平线的雾色渐变到头顶的蓝
+function makeSky() {
+  const geo = new THREE.SphereGeometry(400, 32, 16);
+  const top = new THREE.Color('#3f86cf'), horizon = new THREE.Color(HORIZON);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = Math.max(0, Math.min(1, pos.getY(i) / 220));
+    c.copy(horizon).lerp(top, Math.pow(t, 0.55));
+    cols.set([c.r, c.g, c.b], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }));
 }
 
 function resize() {
@@ -144,7 +185,7 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
-// 地形顶点（格子的角）的高度。地形网格和 heightAt() 都用它，保证人站在地面上。
+// 地形顶点（格子的角）的高度。地形网格和 terrainHeight() 都用它，保证人站在地面上。
 function vertexHeight(i, j) {
   const tx = Math.min(info.w - 1, i), tz = Math.min(info.h - 1, j);
   const t = info.terrain.charCodeAt(tz * info.w + tx) - 48;
@@ -161,11 +202,18 @@ function terrainHeight(x, z) {
   return h00 * (1 - fx) * (1 - fz) + h10 * fx * (1 - fz) + h01 * (1 - fx) * fz + h11 * fx * fz;
 }
 
-// 地形：每个格子的四个角是一个顶点，颜色来自地形编号
+// 确定性的「随机」：同一个格子每次都得到同一个数，草和石头的位置每次刷新都一样
+function hash(x, z, s) {
+  const v = Math.sin(x * 127.1 + z * 311.7 + s * 74.7) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+// 地形：每个格子的四个角是一个顶点，颜色来自地形编号，加一点明暗变化；表面有颗粒感的纹理
 function buildTerrain() {
   const W = info.w, H = info.h, T = info.terrain;
   const pos = new Float32Array((W + 1) * (H + 1) * 3);
   const col = new Float32Array((W + 1) * (H + 1) * 3);
+  const uv = new Float32Array((W + 1) * (H + 1) * 2);
   const c = new THREE.Color();
   for (let j = 0; j <= H; j++) {
     for (let i = 0; i <= W; i++) {
@@ -173,8 +221,11 @@ function buildTerrain() {
       const t = T.charCodeAt(tz * W + tx) - 48;
       const k = (j * (W + 1) + i) * 3;
       pos[k] = i; pos[k + 1] = vertexHeight(i, j); pos[k + 2] = j;
-      c.set(TERRAIN_C[t]);
+      const jitter = 0.92 + 0.08 * hash(i, j, 9);
+      c.set(TERRAIN_C[t]).multiplyScalar(jitter);
       col[k] = c.r; col[k + 1] = c.g; col[k + 2] = c.b;
+      uv[(j * (W + 1) + i) * 2] = i / W;
+      uv[(j * (W + 1) + i) * 2 + 1] = j / H;
     }
   }
   const index = new Uint32Array(W * H * 6);
@@ -189,23 +240,97 @@ function buildTerrain() {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geo.setIndex(new THREE.BufferAttribute(index, 1));
   geo.computeVertexNormals();
-  scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true })));
+  const map = grainTexture();
+  map.repeat.set(W / 3, H / 3);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, map, roughness: 0.95 }));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+// 一小块随机的灰度噪声，叠在地面颜色上，让草地和沙滩不像一张纯色的纸
+function grainTexture() {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 185 + Math.random() * 70;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// 地面装饰：草丛、沙滩上的石头（成千上万个用「实例」一次画完，不会拖慢画面）
+function buildDecor() {
+  const W = info.w, H = info.h;
+  const tufts = [], rocks = [];
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      const t = info.terrain.charCodeAt(j * W + i) - 48;
+      const r = hash(i, j, 1);
+      if ((t === GRASS && r < 0.22) || (t === FOREST && r < 0.06)) {
+        tufts.push([i + 0.15 + 0.7 * hash(i, j, 2), j + 0.15 + 0.7 * hash(i, j, 3), hash(i, j, 4)]);
+      } else if (t === SAND && r < 0.025) {
+        rocks.push([i + 0.2 + 0.6 * hash(i, j, 5), j + 0.2 + 0.6 * hash(i, j, 6), hash(i, j, 7)]);
+      }
+    }
+  }
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  const tuftMesh = new THREE.InstancedMesh(shared.tuft, shared.tuftMat, tufts.length);
+  tufts.forEach(([x, z, v], k) => {
+    const s = 0.6 + 0.8 * v;
+    dummy.position.set(x, terrainHeight(x, z) + 0.2 * s, z);
+    dummy.rotation.set(0, v * 6.28, 0);
+    dummy.scale.set(s, s, s);
+    dummy.updateMatrix();
+    tuftMesh.setMatrixAt(k, dummy.matrix);
+    color.setHSL(0.24 + 0.05 * v, 0.4, 0.22 + 0.1 * v);
+    tuftMesh.setColorAt(k, color);
+  });
+  scene.add(tuftMesh);
+
+  const rockMesh = new THREE.InstancedMesh(shared.rock, shared.rockMat, rocks.length);
+  rockMesh.castShadow = true;
+  rocks.forEach(([x, z, v], k) => {
+    const s = 0.6 + 0.9 * v;
+    dummy.position.set(x, terrainHeight(x, z) + 0.05, z);
+    dummy.rotation.set(v * 3, v * 5, v * 2);
+    dummy.scale.set(s, s * 0.7, s);
+    dummy.updateMatrix();
+    rockMesh.setMatrixAt(k, dummy.matrix);
+  });
+  scene.add(rockMesh);
 }
 
 // ------------------------------------------------------------ 模型
 
+function cast(g) {
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
 function makeTree(id) {
   const g = new THREE.Group();
-  const trunk = new THREE.Mesh(shared.trunk, shared.brown);
-  trunk.position.y = 0.65;
-  const leaf = new THREE.Mesh(shared.leaf, shared.leafMat);
-  leaf.position.y = 2.0;
-  g.add(trunk, leaf);
+  const trunk = new THREE.Mesh(shared.trunk, shared.trunkMat);
+  trunk.position.y = 0.75;
+  const mat = shared.leafMats[id % shared.leafMats.length];
+  const low = new THREE.Mesh(shared.cone1, mat);
+  low.position.y = 1.9;
+  const high = new THREE.Mesh(shared.cone2, mat);
+  high.position.y = 2.8;
+  g.add(trunk, low, high);
   const s = 0.8 + ((id * 37) % 40) / 100;                  // 每棵树大小不一样
   g.scale.setScalar(s);
-  return g;
+  return cast(g);
 }
 
 function makeBush() {
@@ -219,7 +344,7 @@ function makeBush() {
     b.position.set(x, 0.55, z);
     g.add(b);
   }
-  return g;
+  return cast(g);
 }
 
 function makeHerb() {
@@ -229,7 +354,7 @@ function makeHerb() {
     h.position.set(x, 0.25, z);
     g.add(h);
   }
-  return g;
+  return cast(g);
 }
 
 function makeAnimal(kind) {
@@ -248,13 +373,13 @@ function makeAnimal(kind) {
     body.position.y = 0.12;
     g.add(body);
   }
-  return g;
+  return cast(g);
 }
 
 function makePlayer(p) {
   const [id, name, r] = p;
   const g = new THREE.Group();
-  const body = new THREE.Mesh(shared.body, new THREE.MeshLambertMaterial({ color: ROLE_COLOR[r] || 0xffffff }));
+  const body = new THREE.Mesh(shared.body, new THREE.MeshStandardMaterial({ color: ROLE_COLOR[r] || 0xffffff, roughness: 0.6 }));
   body.position.y = 0.45;
   const head = new THREE.Mesh(shared.head, shared.skin);
   head.position.y = 1.15;
@@ -266,7 +391,7 @@ function makePlayer(p) {
     g.add(ring);
   }
   g.add(nameTag(name));
-  return g;
+  return cast(g);
 }
 
 function nameTag(text) {
@@ -280,6 +405,7 @@ function nameTag(text) {
   ctx.fillStyle = '#fff';
   ctx.fillText(text, 128, 42);
   const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
   sprite.scale.set(2.2, 0.55, 1);
   sprite.position.y = 1.9;
@@ -342,8 +468,8 @@ function applyState(s) {
     mesh.userData.dead = p[5];
   }
   removeMissing(players, seen);
-  $('survivors').textContent = `岛上幸存者：${s.players.length} 人`;
-  $('survivors').textContent += ' · ' + s.players.map((p) => p[1] + '（' + (info.roles[p[2]] || '') + '）').join('、');
+  $('survivors').textContent = `岛上幸存者：${s.players.length} 人 · ` +
+    s.players.map((p) => p[1] + '（' + (info.roles[p[2]] || '') + '）').join('、');
 
   // 动物
   const aseen = new Set();
@@ -415,13 +541,15 @@ const USABLE = {
   cooked_fish: '吃', cooked_meat: '吃', medicine: '用',
 };
 
+// 背包：默认收起成一个小按钮，点开才显示列表
 function setInventory(inv) {
+  const entries = Object.entries(inv);
+  $('invCount').textContent = entries.length ? `(${entries.length})` : '';
   const key = JSON.stringify(inv);
   if (key === lastInvKey) return;
   lastInvKey = key;
   const ul = $('inv');
   ul.replaceChildren();
-  const entries = Object.entries(inv);
   if (!entries.length) {
     const li = document.createElement('li');
     li.textContent = '（空）';
@@ -485,6 +613,11 @@ function setupInput() {
 
   document.querySelectorAll('#actions button').forEach((b) => {
     b.addEventListener('click', () => send({ type: 'action', action: b.dataset.action }));
+  });
+  $('invToggle').addEventListener('click', () => {
+    const open = $('inv').hidden;                       // 原来收着 → 展开
+    $('inv').hidden = !open;
+    $('invArrow').textContent = open ? '▾' : '▸';
   });
   $('inv').addEventListener('click', (e) => {
     const item = e.target.dataset && e.target.dataset.item;
@@ -571,7 +704,7 @@ function frame(now) {
     g.children[0].scale.setScalar(0.9 + 0.15 * Math.sin(t * 12 + g.position.x));
   }
 
-  // 镜头盯着自己的模型（同样是插值后的位置），再平滑地跟过去
+  // 镜头盯着自己的模型（插值后的位置），再平滑地跟过去
   const mine = players.get(myId);
   const fx = mine ? mine.position.x : me.x;
   const fz = mine ? mine.position.z : me.z;
@@ -580,5 +713,23 @@ function frame(now) {
   const want = new THREE.Vector3(focus.x + Math.sin(yaw) * dist, focus.y + height, focus.z + Math.cos(yaw) * dist);
   camera.position.lerp(want, 1 - Math.exp(-dt * 8));
   camera.lookAt(focus);
+
+  // 太阳和阴影跟着镜头走：阴影只需要覆盖身边这一块，清晰又省资源
+  sun.position.set(focus.x + 60, focus.y + 90, focus.z + 30);
+  sun.target.position.copy(focus);
+  sun.target.updateMatrixWorld();
+
+  animateWater(t);
   renderer.render(scene, camera);
+}
+
+// 水面起伏：每个顶点高度按时间变化，法线重新计算，高光会跟着波浪动
+function animateWater(t) {
+  const arr = water.geometry.attributes.position.array;
+  for (let i = 0; i < arr.length; i += 3) {
+    const x = waterBase[i], z = waterBase[i + 2];
+    arr[i + 1] = 0.035 * Math.sin(x * 0.45 + t * 1.3) + 0.025 * Math.cos(z * 0.38 - t * 1.1);
+  }
+  water.geometry.attributes.position.needsUpdate = true;
+  water.geometry.computeVertexNormals();
 }

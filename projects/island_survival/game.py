@@ -127,6 +127,23 @@ class Fire:
     until: float
 
 
+def _player_to_dict(p: Player) -> dict:
+    return {
+        "account_id": p.account_id, "name": p.name, "role": p.role,
+        "x": p.x, "z": p.z, "hunger": p.hunger, "health": p.health, "sanity": p.sanity,
+        "sick": p.sick, "dead": p.dead, "inv": dict(p.inv),
+    }
+
+
+def _player_from_dict(d: dict, pid: int) -> Player:
+    return Player(
+        id=pid, account_id=int(d["account_id"]), name=str(d["name"]), role=str(d["role"]),
+        x=float(d["x"]), z=float(d["z"]), hunger=float(d["hunger"]), health=float(d["health"]),
+        sanity=float(d["sanity"]), sick=bool(d["sick"]), dead=bool(d["dead"]),
+        inv={str(k): int(v) for k, v in d["inv"].items()},
+    )
+
+
 class Game:
     def __init__(self, seed: int = 2026):
         self.seed = seed
@@ -139,6 +156,7 @@ class Game:
         self.animals: List[Animal] = []
         self.fires: List[Fire] = []
         self.players: Dict[int, Player] = {}
+        self.saved: Dict[int, dict] = {}           # 下线玩家的角色：账户编号 → 数据，再次上线时接着玩
         self._next_id = 1
         self._generate_map()
         self._populate()
@@ -241,15 +259,65 @@ class Game:
     # ------------------------------------------------------------ 玩家进出
 
     def join(self, account_id: int, name: str, role: str) -> Player:
+        """上线。如果这个账户之前下线时留下了同一个角色，就接着原来的位置和数值玩；否则随机落在岛上。"""
         if role not in ROLES:
             raise GameError("请先选择一个角色")
-        p = Player(id=self._new_id(), account_id=account_id, name=name[:12] or "幸存者", role=role)
-        p.x, p.z = self._spawn_point()
+        old = self.saved.get(account_id)
+        if old and old.get("role") == role:
+            self.saved.pop(account_id)
+            p = _player_from_dict(old, self._new_id())
+            p.name = name[:12] or "幸存者"
+            if p.dead:
+                p.events.append("你还是倒在岛上，点「重新开始」站起来")
+        else:
+            p = Player(id=self._new_id(), account_id=account_id, name=name[:12] or "幸存者", role=role)
+            p.x, p.z = self._spawn_point()
         self.players[p.id] = p
         return p
 
     def leave(self, pid: int) -> None:
-        self.players.pop(pid, None)
+        """下线：角色留在存档里，世界继续运行（别人还可以在岛上找到它的位置，但它不会行动）。"""
+        p = self.players.pop(pid, None)
+        if p is not None:
+            self.saved[p.account_id] = _player_to_dict(p)
+
+    # ------------------------------------------------------------ 存档
+
+    def to_dict(self) -> dict:
+        """整个世界的快照。服务器每隔一段时间存一次，关闭前也存一次。"""
+        saved = dict(self.saved)
+        for p in self.players.values():
+            saved[p.account_id] = _player_to_dict(p)
+        return {
+            "version": self.SAVE_VERSION,
+            "seed": self.seed,
+            "time": self.time,
+            "tick": self.tick_no,
+            "next_id": self._next_id,
+            "res": [[r.id, r.kind, r.x, r.z, r.hp, r.present, r.regrow_at] for r in self.res],
+            "animals": [[a.id, a.kind, a.x, a.z, a.hp, a.heading, a.turn_at] for a in self.animals],
+            "fires": [[f.id, f.x, f.z, f.until] for f in self.fires],
+            "saved": {str(k): v for k, v in saved.items()},
+        }
+
+    SAVE_VERSION = 1
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Game":
+        if d.get("version") != cls.SAVE_VERSION:
+            raise ValueError(f"存档版本 {d.get('version')} 与当前版本 {cls.SAVE_VERSION} 不一致")
+        g = cls(int(d["seed"]))          # 地形由种子决定，直接重新生成
+        g.time = float(d["time"])
+        g.tick_no = int(d["tick"])
+        g._next_id = int(d["next_id"])
+        g.res = [Resource(id=i, kind=k, x=x, z=z, hp=hp, present=pr, regrow_at=ra)
+                 for i, k, x, z, hp, pr, ra in d["res"]]
+        g.tree_at = {r.z * W + r.x: r.id for r in g.res if r.kind == "tree" and r.present}
+        g.animals = [Animal(id=i, kind=k, x=x, z=z, hp=hp, heading=h, turn_at=t)
+                     for i, k, x, z, hp, h, t in d["animals"]]
+        g.fires = [Fire(id=i, x=x, z=z, until=u) for i, x, z, u in d["fires"]]
+        g.saved = {int(k): v for k, v in d["saved"].items()}
+        return g
 
     def respawn(self, p: Player) -> None:
         if not p.dead:
