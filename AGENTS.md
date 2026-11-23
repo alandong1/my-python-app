@@ -32,7 +32,7 @@
 | `conftest.py` | 所有测试共用的配置（临时数据库、测试客户端） |
 | `docs/requirements.md` | **平台**的需求与设计决定 |
 | `scripts/wait_for_deploy.sh` | 等待 PR 合并进 `main`、Render 部署上线 |
-| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试，`pr-gate.yml` PR 审核规则 |
+| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试，`pr-gate.yml` PR 审核规则，`ci-failure-limit.yml` CI 失败次数上限 |
 | `deploy.conf` | 测试环境地址（非机密，正式来源；`README.md` 里有一份抄录） |
 
 ## 常用命令
@@ -66,6 +66,11 @@ scripts/wait_for_deploy.sh                                               # 开 P
    - 合并方式用 **merge commit**，不要 squash 或 rebase，否则 `wait_for_deploy.sh` 判断不出提交是否已合并。
 4. **等待合并并部署上线**：运行 `scripts/wait_for_deploy.sh`。它先等当前提交合并进 `main`，再轮询 `/version`，直到线上版本等于合并后的 `main`。
    - CI 测试失败时 PR 不会合并：修好后在同一个分支上再 push，PR 会自动更新。
+   - **自动修复的次数上限（防止死循环烧 token）**：
+     - 同一个 PR，AI 最多自己修 **3 轮**（CI 失败一次、或审核打回一次，各算一轮）。第 3 轮还不行，就**停止 push**，在 PR 上留言写清楚卡在哪、试过什么，然后通知负责人，等人工介入。
+     - `.github/workflows/ci-failure-limit.yml` 会强制执行：同一个 PR 的 CI 失败满 3 次，自动打上 **`needs-human`** 标签、关闭自动合并、留言通知负责人。
+     - PR 带 `needs-human` 标签时，**AI 不要再 push、不要去掉这个标签**，只能等负责人处理。负责人去掉标签后，计数从零开始，自动 approve 和自动合并也会恢复。
+     - 不要为了让 CI 重新跑而推空提交，也不要跳过或删掉测试。同一份代码的 CI 最多手动重跑一次。
 5. **通知负责人刷新页面**，并说明改了什么、去哪个页面看。
    - 有存档的项目（如领主战争）会在部署前自动存档、部署后恢复；如果这次改了存档格式，要提醒负责人「这次会开新世界」。
    - 如果这次改动需要负责人在**外部网站**上操作（见「改动时同步更新的文件」里的 🖐️ 项），必须逐条列出。
@@ -122,7 +127,7 @@ scripts/wait_for_deploy.sh                                               # 开 P
 | 新增 / 删除项目 | `projects/__init__.py`、`docs/requirements.md`「项目列表」、`README.md` | — |
 | 项目名称 / 图标 / 分类 / 状态 | `projects/<slug>/__init__.py` 的 `PROJECT` | — |
 | 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要；`docs/requirements.md`「环境与部署」 | — |
-| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」也要跟着改 |
+| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`.github/workflows/ci-failure-limit.yml`、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」也要跟着改 |
 | 编码规范 | `AGENTS.md`「规范」；重要的同步到 `.github/copilot-instructions.md` | — |
 | 测试环境网址 | `deploy.conf`、`README.md`「环境与网址」 | Render 环境变量 `PUBLIC_BASE_URL`；已启用的 OAuth 在 Google/Apple/微信后台的回调地址 |
 | 换部署平台 / 服务器 | `deploy.conf`、`render.yaml`、`app/settings.py`（`IS_RENDER`、`GIT_COMMIT` 的来源）、`app/main.py` 里的 Render 判断、`AGENTS.md`「环境」、`README.md` | 新平台的环境变量；OAuth 回调地址 |
