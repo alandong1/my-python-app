@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: 把已提交的改动 push 到 main，并等待 Render 测试环境部署上线后通知用户刷新。在完成代码改动并测试通过之后使用，或者用户问"部署了吗 / 上线了吗 / 可以刷新了吗"时使用。
+description: 把已提交的改动 push 到自己的分支并开 PR 到 main，等待 PR 合并、Render 测试环境部署上线后通知用户刷新。在完成代码改动并测试通过之后使用，或者用户问"部署了吗 / 上线了吗 / 可以刷新了吗"时使用。
 ---
 
 # 部署到远程测试环境
@@ -13,19 +13,22 @@ description: 把已提交的改动 push 到 main，并等待 Render 测试环境
    - `git status --short`：有没有该提交却没提交的文件？有没有不该提交的文件（`.env`、`*.db`）？
    - `.venv/bin/python -m pytest -q`：如果上次运行测试之后又改过代码，就再运行一次。
 
-2. **push**
+2. **push 到自己的分支并开 PR**（不要直接 push 到 `main`）
    ```bash
-   git push origin main
+   git push -u origin <当前分支>
    ```
+   然后用 GitHub 工具开 PR 到 `main`（已有 PR 就不用再开，push 后 PR 会自动更新）。标题和描述用英文。
+   - 负责人本人账号开的 PR：会自动 approve，CI 测试通过后自动合并。
+   - 别人的 PR：要等负责人审核。告诉用户 PR 链接，请他去审核。
 
-3. **等待上线**（会自动轮询 `/version`，最长 10 分钟）
+3. **等待合并和上线**（先等合并，再轮询 `/version`，总共最长 10 分钟）
    ```bash
    scripts/wait_for_deploy.sh
    ```
    这个命令可能要运行几分钟，Bash 的超时时间要设到 600000 毫秒左右。
    - 退出码 `0`：已上线。
-   - 退出码 `1`：超时。告诉用户去 Render Dashboard 的 **Events / Logs** 页面看部署是否失败，并请用户把报错发过来。**不要说已经上线。**
-   - 退出码 `2`：提交还没有推送到 `origin/main`。回到第 2 步。
+   - 退出码 `1`：超时。如果卡在「等待合并」，去 GitHub 看 PR：CI 是否失败（失败就修好再 push）、是否在等审核。如果卡在部署，告诉用户去 Render Dashboard 的 **Events / Logs** 页面看部署是否失败，并请用户把报错发过来。**不要说已经上线。**
+   - 退出码 `2`：参数或环境错误，按提示处理。
    - 如果输出 `⚠️ 线上没有使用 PostgreSQL`，立即告诉用户检查 Render 上的 `DATABASE_URL`。
 
 4. **通知用户**（用中文）

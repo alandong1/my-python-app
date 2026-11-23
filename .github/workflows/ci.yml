@@ -1,0 +1,26 @@
+# 自动测试：每个 PR、以及合并进 main 之后，都在 GitHub 的服务器上跑一遍全部测试。
+# 分支保护要求这里的检查通过，PR 才能合并。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 = 负责人本地的版本（代码必须兼容）；3.12 = Render 线上的版本
+        python-version: ["3.9", "3.12"]
+    # 用官方 Python 镜像跑：GitHub 新版 Ubuntu 上已经装不了 3.9 这类旧版本
+    container: python:${{ matrix.python-version }}-slim
+    steps:
+      - uses: actions/checkout@v5
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q

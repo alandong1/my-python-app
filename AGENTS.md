@@ -31,7 +31,8 @@
 | `tests/` | 平台层的测试（账户、OAuth、首页、项目挂载） |
 | `conftest.py` | 所有测试共用的配置（临时数据库、测试客户端） |
 | `docs/requirements.md` | **平台**的需求与设计决定 |
-| `scripts/wait_for_deploy.sh` | push 后等待 Render 部署上线 |
+| `scripts/wait_for_deploy.sh` | 等待 PR 合并进 `main`、Render 部署上线 |
+| `.github/workflows/` | GitHub Actions：`ci.yml` 自动测试，`pr-gate.yml` PR 审核规则 |
 | `deploy.conf` | 测试环境地址（非机密，正式来源；`README.md` 里有一份抄录） |
 
 ## 常用命令
@@ -41,7 +42,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # 首�
 .venv/bin/uvicorn app.main:app --reload                                  # 本地运行 http://localhost:8000
 .venv/bin/python -m pytest -q                                            # 运行全部测试（平台 + 所有项目）
 .venv/bin/python -m pytest -q projects/lordwar                           # 只测某个项目
-scripts/wait_for_deploy.sh                                               # push 后等待部署上线
+scripts/wait_for_deploy.sh                                               # 开 PR 后等待合并并部署上线
 ```
 
 ## 开发流程（必须遵守）
@@ -54,14 +55,19 @@ scripts/wait_for_deploy.sh                                               # push 
 2. **本地测试**：运行 `.venv/bin/python -m pytest -q`，必须全部通过。
    - 新功能或修 bug 时补充对应测试：平台的放 `tests/`，项目的放 `projects/<slug>/test_*.py`。
    - 改了前端：本地启动服务器，在浏览器里实际操作一遍，确认没有 JS 报错。
-3. **提交并直接 push 到 `main`**（目前是个人项目，不走 PR）：
-   `git add <具体文件>` → `git commit` → `git push origin main`
-4. **等待部署上线**：运行 `scripts/wait_for_deploy.sh`。它会轮询 `/version`，直到线上版本等于刚推送的提交。
+3. **在自己的分支上提交，开 PR 合并到 `main`**。不要直接 push 到 `main`，分支保护也会拒绝。
+   - 每个开发者（人或 AI 会话）用自己的分支，例如 `feature/<功能名>`；AI 云端会话用系统指定的分支（如 `claude/...`）。
+   - `git add <具体文件>` → `git commit` → `git push -u origin <分支>` → 在 GitHub 上开 PR 到 `main`。
+   - PR 标题和描述用英文写清楚改了什么、为什么。
+   - **审核规则**（`.github/workflows/pr-gate.yml`）：PR 作者是负责人本人（包括负责人指挥的 AI）→ 自动 approve，测试（`.github/workflows/ci.yml`）通过后**自动合并**；其他人的 PR（包括别人用 AI 写的）→ 等负责人审核。
+   - 合并方式用 **merge commit**，不要 squash 或 rebase，否则 `wait_for_deploy.sh` 判断不出提交是否已合并。
+4. **等待合并并部署上线**：运行 `scripts/wait_for_deploy.sh`。它先等当前提交合并进 `main`，再轮询 `/version`，直到线上版本等于合并后的 `main`。
+   - CI 测试失败时 PR 不会合并：修好后在同一个分支上再 push，PR 会自动更新。
 5. **通知负责人刷新页面**，并说明改了什么、去哪个页面看。
    - 有存档的项目（如领主战争）会在部署前自动存档、部署后恢复；如果这次改了存档格式，要提醒负责人「这次会开新世界」。
    - 如果这次改动需要负责人在**外部网站**上操作（见「改动时同步更新的文件」里的 🖐️ 项），必须逐条列出。
 
-测试没通过就不要 push。部署超时就去看 Render 的 Events/Logs，不要假装已上线。
+测试没通过就不要开 PR。部署超时就去看 Render 的 Events/Logs，不要假装已上线。
 
 ## 新建项目
 
@@ -95,7 +101,7 @@ scripts/wait_for_deploy.sh                                               # push 
 |---|---|---|
 | 地址 | http://localhost:8000 | 见 `deploy.conf` 的 `DEPLOY_URL`（正式来源；`README.md` 里抄了一份供人查看，改网址时两处一起改） |
 | 数据库 | 未设置 `DATABASE_URL` 时用 SQLite `dev.db` | Neon PostgreSQL（us-east-2） |
-| 部署 | — | push 到 `main` 后 Render 自动部署（约 1–5 分钟） |
+| 部署 | — | PR 合并进 `main` 后 Render 自动部署（约 1–5 分钟） |
 
 - 远程环境目前是**测试环境**，还没有真实用户。以后有正式环境时会分出 `production` 分支、第二个 Render 服务和 Neon 分支。
 - `/version` 返回线上的提交号和数据库类型；`/health` 返回各项目的状态。
@@ -112,7 +118,8 @@ scripts/wait_for_deploy.sh                                               # push 
 | 某个项目的需求 / 玩法 | `projects/<slug>/REQUIREMENTS.md`；变化较大时同步 `README.md` | — |
 | 新增 / 删除项目 | `projects/__init__.py`、`docs/requirements.md`「项目列表」、`README.md` | — |
 | 项目名称 / 图标 / 分类 / 状态 | `projects/<slug>/__init__.py` 的 `PROJECT` | — |
-| 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要 | — |
+| 开发流程 | `AGENTS.md`「开发流程」；涉及部署时 `.claude/skills/deploy/SKILL.md`；`.github/copilot-instructions.md` 里的摘要；`docs/requirements.md`「环境与部署」 | — |
+| CI 测试 / PR 审核规则 | `.github/workflows/ci.yml`、`.github/workflows/pr-gate.yml`、`AGENTS.md`「开发流程」、`docs/requirements.md` | 改了 CI 的 job 名或 Python 版本时，GitHub 分支保护里「必须通过的检查」也要跟着改 |
 | 编码规范 | `AGENTS.md`「规范」；重要的同步到 `.github/copilot-instructions.md` | — |
 | 测试环境网址 | `deploy.conf`、`README.md`「环境与网址」 | Render 环境变量 `PUBLIC_BASE_URL`；已启用的 OAuth 在 Google/Apple/微信后台的回调地址 |
 | 换部署平台 / 服务器 | `deploy.conf`、`render.yaml`、`app/settings.py`（`IS_RENDER`、`GIT_COMMIT` 的来源）、`app/main.py` 里的 Render 判断、`AGENTS.md`「环境」、`README.md` | 新平台的环境变量；OAuth 回调地址 |

@@ -44,7 +44,7 @@ cp .env.example .env        # 按需填写，全部留空也能运行
 
 ```bash
 .venv/bin/python -m pytest -q          # 运行全部测试
-scripts/wait_for_deploy.sh             # push 到 main 后等待 Render 部署上线
+scripts/wait_for_deploy.sh             # 开 PR 后等待合并进 main、Render 部署上线
 ```
 
 ## 技术栈
@@ -52,4 +52,5 @@ scripts/wait_for_deploy.sh             # push 到 main 后等待 Render 部署�
 - 后端：Python（FastAPI），WebSocket 实时通信
 - 前端：原生 JavaScript
 - 数据库：PostgreSQL（Neon），保存账户、登录会话和项目存档
-- 部署：Render，push 到 `main` 自动部署
+- 部署：Render，PR 合并进 `main` 后自动部署
+- CI：GitHub Actions，每个 PR 自动跑测试；负责人本人的 PR 自动 approve 并合并，其他人的 PR 需负责人审核
