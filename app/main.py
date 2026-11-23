@@ -8,16 +8,18 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import config as C
+from . import settings
 from .auth import SESSION_COOKIE, lookup_session_user
 from .auth import router as auth_router
 from .db import describe_db, init_db
@@ -51,7 +53,11 @@ async def game_loop():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    log.info("数据库：%s", describe_db())
+    log.info("版本：%s，数据库：%s", settings.GIT_COMMIT, describe_db())
+    if settings.IS_RENDER and settings.DATABASE_URL.startswith("sqlite"):
+        # 线上用 SQLite 的话，数据会在每次重启时丢失。宁可启动失败，也不要悄悄丢数据
+        log.error("线上环境没有配置 DATABASE_URL！请在 Render 的 Environment 里添加 Neon 连接字符串。")
+        raise RuntimeError("DATABASE_URL is required on Render")
     await run_in_threadpool(init_db)
     task = asyncio.create_task(game_loop())
     yield
@@ -63,14 +69,31 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 app.include_router(auth_router)
 
 
+BOOT_TIME = datetime.now(timezone.utc)
+
+
 @app.get("/")
 async def index():
-    return FileResponse(STATIC / "index.html")
+    # 给 js/css 地址加上版本号：每次部署后浏览器会自动加载新文件，不会用缓存里的旧版本
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    for f in ("game.js", "style.css"):
+        html = html.replace(f"/static/{f}", f"/static/{f}?v={settings.GIT_COMMIT}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/health")
 async def health():
     return {"ok": True, "players": len(game.players), "online": len(clients), "tick": game.tick_no}
+
+
+@app.get("/version")
+async def version():
+    """当前运行的是哪个 git 提交，用来确认新版本是否已经部署上线。"""
+    return {
+        "commit": settings.GIT_COMMIT,
+        "started": BOOT_TIME.isoformat(timespec="seconds"),
+        "db": "postgresql" if settings.DATABASE_URL.startswith("postgresql") else "sqlite",
+    }
 
 
 ACTIONS = {

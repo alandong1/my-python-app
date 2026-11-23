@@ -30,6 +30,10 @@ def _normalize_db_url(url: str) -> str:
 
 DATABASE_URL = _normalize_db_url(_env("DATABASE_URL"))
 
+# Render 会自动设置这两个环境变量
+IS_RENDER = _env("RENDER") == "true"
+GIT_COMMIT = _env("RENDER_GIT_COMMIT")[:7] or "dev"
+
 # 网站对外的地址，OAuth 回调地址由它拼出来。本地是 http://localhost:8000
 PUBLIC_BASE_URL = _env("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
