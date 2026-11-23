@@ -33,6 +33,7 @@
 | 项目 | slug | 分类 | 状态 | 需求文档 |
 |---|---|---|---|---|
 | ⚔️ 领主战争 | `lordwar` | 游戏 | 测试中 | `projects/lordwar/REQUIREMENTS.md` |
+| 🐍 贪吃蛇 | `snake` | 游戏 | 测试中 | `projects/snake/REQUIREMENTS.md` |
 
 ## 3. 账户与登录
 

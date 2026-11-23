@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title data-i18n>贪吃蛇 · Dev Lab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐍</text></svg>">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <a href="/" class="home" data-i18n-title="返回 Dev Lab">🏠</a>
+    <span class="title" data-i18n>贪吃蛇</span>
+    <span class="spacer"></span>
+    <button data-lang-toggle class="lang-toggle"></button>
+  </header>
+
+  <main>
+    <div class="stats">
+      <span><span data-i18n>得分</span> <b id="score">0</b></span>
+      <span><span data-i18n>最高</span> <b id="best">0</b></span>
+      <button id="pauseBtn" data-i18n>暂停</button>
+    </div>
+
+    <canvas id="board" width="400" height="400"></canvas>
+    <p id="msg" role="status"></p>
+
+    <div class="pad" data-i18n-aria="方向控制">
+      <button class="up" data-dir="up" data-i18n-aria="上">▲</button>
+      <button class="left" data-dir="left" data-i18n-aria="左">◀</button>
+      <button class="down" data-dir="down" data-i18n-aria="下">▼</button>
+      <button class="right" data-dir="right" data-i18n-aria="右">▶</button>
+    </div>
+
+    <p class="help" data-i18n-html><b>电脑：</b>方向键或 WASD 控制，空格开始 / 重新开始，P 暂停。<br><b>手机：</b>在画布上滑动控制方向，轻点开始 / 暂停，或使用下方方向按钮。<br>吃到食物会变长，撞墙或撞到自己就结束。</p>
+  </main>
+
+  <script src="/static/i18n.js"></script>
+  <script src="static/lang.js"></script>
+  <script src="static/game.js"></script>
+</body>
+</html>
