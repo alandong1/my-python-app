@@ -464,3 +464,28 @@ def test_bots_move_when_nobody_is_around(arena, clock):
         clock.t += 0.05
         arena.tick()
     assert (bot.x, bot.z) != start
+
+
+def test_lag_compensation_hits_where_shooter_saw_the_target(arena, clock):
+    """目标 0.2 秒前在 x=5，现在移到了 x=7；射手看到的是 0.1 秒前的画面（x=6），所以按 x=6 判定。"""
+    shooter = arena.add_player("甲")
+    target = arena.add_player("乙")
+    target.team = 1 - shooter.team
+    place(shooter, 5.0, 0.0)                      # 远离中央柱子（原点附近有柱子）
+    place(target, 5.0, -10.0)
+    clock.t = 100.0
+    arena.tick()
+    target.x = 7.0
+    clock.t = 100.2
+    arena.tick()
+    # 射手瞄准 x=1 的位置（距离 10 米）
+    shooter.yaw = math.atan2(-1.0, 10.0)
+    shooter.pitch = math.atan2(1.0 - C.EYE_HEIGHT, 10.0)   # 瞄准身体（约 1 米高），不是头
+    arena.fire(shooter.id, rewind=True)           # 补偿：按 0.1 秒前的 x=1，打中
+    assert target.hp == C.MAX_HP - PISTOL["body"]
+    # 之后目标继续停在 x=2，不补偿的射击按现在的位置判定，同一个瞄准方向就打不中了
+    target.hp = C.MAX_HP
+    clock.t += C.WEAPONS["pistol"]["interval"] + 0.5
+    arena.tick()
+    arena.fire(shooter.id, rewind=False)
+    assert target.hp == C.MAX_HP

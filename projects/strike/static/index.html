@@ -27,6 +27,12 @@
 
   <!-- 游戏中的 HUD（进入房间后显示）。文字不接收触摸，只有带 ui-btn 的按钮会接收 -->
   <div id="hud" class="hidden">
+    <div id="roomBar" class="hidden">
+      <span id="roomTitle"></span>
+      <button id="botAddBtn" class="ui-btn host-only" data-i18n>+电脑</button>
+      <button id="botDelBtn" class="ui-btn host-only" data-i18n>-电脑</button>
+      <button id="disbandBtn" class="ui-btn host-only" data-i18n>解散房间</button>
+    </div>
     <div id="stats"><span><span data-i18n>击杀</span> <b id="kills">0</b></span><span><span data-i18n>死亡</span> <b id="deaths">0</b></span><span><span data-i18n>金钱</span> <b id="money">$0</b></span><span id="teamScores"></span></div>
     <div id="hpbar"><div id="hpfill"></div><span id="hptext">100</span></div>
     <div id="feed"></div>
@@ -57,20 +63,22 @@
 
   <!-- 进入界面 -->
   <main id="menu">
-    <div class="card">
+    <div class="card lobby">
       <h1>🔫 <span data-i18n>突击行动</span></h1>
-      <p class="sub" data-i18n>CS 风格的多人第一人称射击，同一个竞技场里互相对战。</p>
-      <form id="joinForm">
-        <label for="nameInput" data-i18n>昵称</label>
-        <input id="nameInput" maxlength="12" autocomplete="off" required data-i18n-ph="1 到 12 个字符">
-        <button type="submit" class="primary" data-i18n>进入竞技场</button>
-      </form>
+      <p class="sub"><span data-i18n>大厅</span> · <b id="myName"></b></p>
+      <div class="create">
+        <input id="roomName" maxlength="16" autocomplete="off" data-i18n-ph="房间名（可不填）">
+        <button id="createBtn" class="primary" data-i18n>建房间</button>
+      </div>
+      <p id="createHint" class="hint"></p>
+      <button id="backRoomBtn" class="ui-btn hidden" data-i18n>回到我的房间</button>
       <p id="status" role="status"></p>
+      <button id="reconnectBtn" class="ui-btn hidden" data-i18n>重新连接</button>
+      <div id="roomList" class="room-list"></div>
       <div class="help">
-        <p><b data-i18n>电脑：</b><span data-i18n>W A S D 移动，鼠标转向，左键开火，按住 Tab 看记分板，Esc 释放鼠标。</span></p>
-        <p><b data-i18n>手机：</b><span data-i18n>左下角拖动移动，右半边屏幕滑动转向，右下角按住开火，建议横屏。</span></p>
-        <p data-i18n>爆头（子弹打在头部）一枪毙命。死亡后 3 秒自动复活。</p>
-        <p class="credit" data-i18n>人物模型 CesiumMan 由 Cesium 制作，CC BY 4.0。环境光来自 pmndrs/assets（CC0）。</p>
+        <p><b data-i18n>电脑：</b><span data-i18n>W A S D 移动，鼠标转向，左键开火，右键瞄准，1 / 2 换枪，B 商店，Tab 看记分板，Esc 释放鼠标。</span></p>
+        <p><b data-i18n>手机：</b><span data-i18n>左下角拖动移动，右半边屏幕滑动转向，右下角按住开火。</span></p>
+        <p data-i18n>注册账号后才能建房；游客可以加入别人的房间。房主关闭网页不会解散房间，只有房主主动解散才会关闭。</p>
       </div>
     </div>
   </main>

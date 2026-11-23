@@ -117,6 +117,7 @@ class Player:
     bot_seen_since: float = 0.0              # 什么时候第一次看到这个敌人
     bot_wp: Optional[Tuple[float, float]] = None   # 电脑巡逻的目标点
     bot_wp_until: float = 0.0                # 巡逻目标最晚到什么时候换
+    history: List[Tuple[float, float, float]] = field(default_factory=list)   # 最近的 (时间, x, z)，用来延迟补偿
 
     def weapon(self) -> dict:
         return C.WEAPONS[self.slots[self.active] or C.DEFAULT_WEAPON]
@@ -170,20 +171,30 @@ class Arena:
     def human_count(self) -> int:
         return sum(1 for p in self.players.values() if not p.is_bot)
 
-    def balance_bots(self) -> None:
-        """让「人类玩家 + 电脑」至少有 MIN_ONLINE 人：不够就加电脑，多了就踢掉电脑（优先踢人多的那一队的）。"""
-        target = max(0, C.MIN_ONLINE - self.human_count())
+    def remove_one_bot(self) -> bool:
+        """踢掉一台电脑（优先踢人多的那一队的，同队就踢编号最大的）。没有电脑时返回 False。"""
+        bots = [p for p in self.players.values() if p.is_bot]
+        if not bots:
+            return False
+        counts = [0, 0]
+        for b in bots:
+            counts[b.team] += 1
+        team = 0 if counts[0] >= counts[1] else 1
+        victim = max((b for b in bots if b.team == team), key=lambda b: b.id)
+        self.remove_player(victim.id)
+        return True
+
+    def balance_bots(self, extra: int = 0) -> None:
+        """让「人类玩家 + 电脑」尽量保持 MIN_ONLINE 人，再加上房主设置的 extra（可以是负数）。
+        不超过房间的人数上限。"""
+        humans = self.human_count()
+        target = max(0, min(C.MIN_ONLINE - humans + extra, C.MAX_PLAYERS - humans))
         bots = [p for p in self.players.values() if p.is_bot]
         while len(bots) < target:
             bots.append(self.add_bot())
         while len(bots) > target:
-            counts = [0, 0]
-            for b in bots:
-                counts[b.team] += 1
-            team = 0 if counts[0] >= counts[1] else 1
-            victim = max((b for b in bots if b.team == team), key=lambda b: b.id)
-            bots.remove(victim)
-            self.remove_player(victim.id)
+            self.remove_one_bot()
+            bots = [p for p in self.players.values() if p.is_bot]
 
     # ---- 出生与复活
 
@@ -208,10 +219,14 @@ class Arena:
         p.bot_wp = None
 
     def tick(self) -> None:
-        """每个广播周期调用一次：复活到期的人，然后让电脑玩家思考和行动。"""
+        """每个广播周期调用一次：记录位置历史，复活到期的人，然后让电脑玩家思考和行动。"""
         now = self.clock()
         dt = 0.0 if self._last_tick is None else min(max(now - self._last_tick, 0.0), C.MAX_DT)
         self._last_tick = now
+        for p in self.players.values():
+            p.history.append((now, p.x, p.z))
+            while p.history and p.history[0][0] < now - C.HISTORY_SECONDS:
+                p.history.pop(0)
         for p in self.players.values():
             if not p.alive and now >= p.respawn_at:
                 self.spawn(p)
@@ -271,7 +286,20 @@ class Arena:
         p.scoped = False
         return True
 
-    def fire(self, pid: int, extra_spread: float = 0.0) -> None:
+    def _rewound(self, q: Player, t: float) -> Tuple[float, float]:
+        """玩家 q 在时间 t 的位置（根据历史记录插值）。没有记录就返回当前位置。"""
+        h = q.history
+        if not h or t >= h[-1][0]:
+            return q.x, q.z
+        if t <= h[0][0]:
+            return h[0][1], h[0][2]
+        for (t0, x0, z0), (t1, x1, z1) in zip(h, h[1:]):
+            if t0 <= t <= t1:
+                k = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
+                return x0 + (x1 - x0) * k, z0 + (z1 - z0) * k
+        return q.x, q.z
+
+    def fire(self, pid: int, extra_spread: float = 0.0, rewind: bool = True) -> None:
         p = self.players.get(pid)
         if p is None or not p.alive:
             return
@@ -303,8 +331,10 @@ class Arena:
         for q in self.players.values():
             if q is p or not q.alive or q.team == p.team:
                 continue
+            # 延迟补偿：玩家看到的是过去的画面，所以按射手看到的时间去判定（电脑不用，它看的就是现在）
+            qx, qz = self._rewound(q, now - C.LAG_COMP) if rewind else (q.x, q.z)
             r = C.PLAYER_RADIUS
-            t = ray_box(origin, d, (q.x - r, 0.0, q.z - r), (q.x + r, C.PLAYER_HEIGHT, q.z + r))
+            t = ray_box(origin, d, (qx - r, 0.0, qz - r), (qx + r, C.PLAYER_HEIGHT, qz + r))
             if t is not None and t <= reach and (target is None or t < hit_t):
                 target, hit_t = q, t
 
@@ -390,7 +420,7 @@ class Arena:
             p.x, p.z = move(p.x, p.z, fwd, side, p.yaw, dt)
             aimed = abs(_angle_diff(p.yaw, want_yaw)) < 0.2 and abs(_angle_diff(p.pitch, want_pitch)) < 0.2
             if aimed and now - p.bot_seen_since >= C.BOT_REACTION and self.rng.random() < C.BOT_FIRE_CHANCE:
-                self.fire(p.id, extra_spread=C.BOT_SPREAD)
+                self.fire(p.id, extra_spread=C.BOT_SPREAD, rewind=False)
             return
 
         # 看不到敌人：巡逻。走到目标点、或者目标点到期、或者被挡住了，就换一个目标点。
@@ -415,7 +445,8 @@ class Arena:
 
     def roster(self) -> List[dict]:
         return [
-            {"id": p.id, "name": p.name, "team": p.team, "x": round(p.x, 3), "z": round(p.z, 3),
+            {"id": p.id, "name": p.name, "team": p.team, "bot": p.is_bot,
+             "x": round(p.x, 3), "z": round(p.z, 3),
              "yaw": round(p.yaw, 4), "pitch": round(p.pitch, 4), "hp": p.hp, "alive": p.alive,
              "kills": p.kills, "deaths": p.deaths}
             for p in self.players.values()
