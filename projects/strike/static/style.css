@@ -216,3 +216,30 @@ button.primary {
 @media (pointer: coarse) {
   #hint { display: none; }
 }
+
+/* 大厅 */
+.lobby { width: min(520px, 100%); max-height: 100%; overflow-y: auto; }
+.create { display: flex; gap: 8px; margin: 8px 0; }
+.create input { flex: 1; min-width: 0; }
+.create button { white-space: nowrap; }
+.hint { color: var(--muted); font-size: 13px; min-height: 1.2em; margin: 4px 0; }
+.room-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.room-card {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.1);
+}
+.room-card .info { flex: 1; min-width: 0; }
+.room-card .title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-card .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.room-card button:disabled { opacity: .4; cursor: default; }
+.room-empty { color: var(--muted); font-size: 14px; padding: 12px 0; }
+
+/* 房间信息条（房主控制） */
+#roomBar {
+  position: absolute; top: calc(52px + env(safe-area-inset-top)); left: 12px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 60vw;
+  font-size: 13px; text-shadow: 0 1px 3px #000;
+}
+#roomBar .ui-btn { font-size: 12px; padding: 4px 8px; }
+#roomTitle { font-weight: 700; margin-right: 4px; }
+.kick-btn { font-size: 12px; padding: 2px 8px; }

@@ -3,8 +3,6 @@
 // 判定都在服务器（projects/strike/game.py）；这里的 move() 必须和服务器的 move() 保持一致，用于预测。
 import * as THREE from "three";
 import { EXRLoader } from "three/addons/loaders/EXRLoader.js";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 
 const tr = (...args) => i18n.t(...args);
 const $ = (id) => document.getElementById(id);
@@ -34,6 +32,9 @@ let arenaBuilt = false;
 let wasAlive = false;          // 上一次收到的状态里，自己是否活着（用来判断刚出生或刚复活）
 let shopOpen = false;          // 商店是否打开（打开时不能移动和开火）
 let teamKills = [0, 0];        // 红队、蓝队的击杀数（服务器发来）
+let lobby = { me: {}, rooms: [] };   // 大厅：我是谁、有哪些房间（服务器发来）
+let inRoom = false;            // 是否已经在房间里
+let roomInfo = null;           // 当前房间的信息（房主是谁、电脑多少、我是不是房主）
 let myTeam = 0;                // 我在哪一队：0 红队，1 蓝队
 const TEAM_COLORS = [0xe4572e, 0x3e92cc];   // 红队、蓝队的颜色
 const TEAM_CSS = ["#ff7a5c", "#6fb8ff"];    // 同样的颜色，用在文字上
@@ -100,9 +101,8 @@ scene.add(sun);
 // 真实的环境光：加载真实拍摄的城市 HDRI（CC0），用它照亮场景、反射到金属和玻璃上，并作为天空背景。
 // 加载在 loadAssets() 里完成；没加载成功时保留上面的渐变天空，游戏照常可以玩。
 let envTexture = null;
-let manGltf = null;            // CesiumMan 人物模型（加载成功后才有）
-let manScale = 1, manOffsetY = 0;
 
+// 加载真实拍摄的城市 HDRI（CC0）：照亮场景、反射到表面，并作为天空背景。没加载成功时保留渐变天空，游戏照常可以玩。
 async function loadAssets() {
   try {
     const exr = await new EXRLoader().loadAsync("static/assets/city.exr");
@@ -113,16 +113,7 @@ async function loadAssets() {
     scene.environment = envTexture;
     scene.background = envTexture;
   } catch (e) {
-    // 没加载到环境光：保留渐变天空，画面仍然可以玩
-  }
-  try {
-    manGltf = await new GLTFLoader().loadAsync("static/assets/CesiumMan.glb");
-    const box = new THREE.Box3().setFromObject(manGltf.scene);
-    const height = box.max.y - box.min.y;
-    manScale = 1.8 / height;             // 统一成 1.8 米高，和碰撞体一致
-    manOffsetY = -box.min.y * manScale;  // 脚踩在地面上
-  } catch (e) {
-    manGltf = null;                      // 没加载到人物：用原来的胶囊人物
+    // 没加载到环境光：保留渐变天空
   }
 }
 
@@ -535,55 +526,21 @@ function nameSprite(text) {
 }
 
 function makeRemote(p) {
-  if (!manGltf) return makeRemoteCapsule(p);
-  const group = new THREE.Group();
-  const root = SkeletonUtils.clone(manGltf.scene);
-  root.rotation.y = Math.PI;             // 模型默认朝 +z，转到朝 -z（游戏里的前方）
-  root.scale.setScalar(manScale);
-  root.position.y = manOffsetY;
-  const tint = new THREE.Color(TEAM_COLORS[p.team] ?? 0xffffff);
-  root.traverse((o) => {
-    if (o.isMesh) {
-      o.castShadow = true;
-      o.material = o.material.clone();
-      o.material.color.copy(tint);       // 按玩家的颜色染色，方便区分
-    }
-  });
-  const mixer = new THREE.AnimationMixer(root);
-  const clip = manGltf.animations[0];
-  const action = clip ? mixer.clipAction(clip) : null;
-  if (action) action.play();
-  const gunPivot = new THREE.Group();   // 枪挂在胸前，随视线上下转动
-  gunPivot.position.set(0.12, 1.25, -0.08);
-  gunPivot.add(part(new THREE.BoxGeometry(0.1, 0.12, 0.62), gearMat, 0.05, 0, -0.35));
-  group.add(root, gunPivot, nameSprite(p.name));
-  group.position.set(p.x, 0, p.z);
-  scene.add(group);
-  const r = { group, gunPivot, target: p, mixer, action, moving: 0 };
-  remotes.set(p.id, r);
-  return r;
-}
-
-function makeRemoteCapsule(p) {
   const group = new THREE.Group();
   const suit = new THREE.MeshStandardMaterial({ color: TEAM_COLORS[p.team] ?? 0xffffff, roughness: 0.7 });
   const pants = new THREE.MeshStandardMaterial({ color: 0x3a3f2e, roughness: 0.9 });
   const boots = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
   group.add(
-    // 腿（胶囊体）和靴子
     part(new THREE.CapsuleGeometry(0.1, 0.5, 6, 12), pants, -0.12, 0.5, 0),
     part(new THREE.CapsuleGeometry(0.1, 0.5, 6, 12), pants, 0.12, 0.5, 0),
     part(new THREE.BoxGeometry(0.16, 0.1, 0.26), boots, -0.12, 0.05, -0.04),
     part(new THREE.BoxGeometry(0.16, 0.1, 0.26), boots, 0.12, 0.05, -0.04),
-    // 躯干（胶囊体）+ 战术背心
     part(new THREE.CapsuleGeometry(0.2, 0.42, 6, 14), suit, 0, 1.2, 0),
     part(new THREE.BoxGeometry(0.42, 0.4, 0.22), gearMat, 0, 1.2, -0.06),
-    // 手臂和手
     part(new THREE.CapsuleGeometry(0.075, 0.4, 4, 10), suit, -0.29, 1.18, -0.02),
     part(new THREE.CapsuleGeometry(0.075, 0.4, 4, 10), suit, 0.29, 1.18, -0.02),
     part(new THREE.SphereGeometry(0.075, 10, 8), skinMat, -0.25, 0.95, -0.12),
     part(new THREE.SphereGeometry(0.075, 10, 8), skinMat, 0.25, 0.95, -0.12),
-    // 脖子、头和头盔（半球）
     part(new THREE.CylinderGeometry(0.06, 0.06, 0.1, 10), skinMat, 0, 1.46, 0),
     part(new THREE.SphereGeometry(0.13, 16, 12), skinMat, 0, 1.6, 0),
     part(new THREE.SphereGeometry(0.155, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), gearMat, 0, 1.64, 0),
@@ -594,27 +551,31 @@ function makeRemoteCapsule(p) {
   group.add(gunPivot, nameSprite(p.name));
   group.position.set(p.x, 0, p.z);
   scene.add(group);
-  const r = { group, gunPivot, target: p };
+  const r = { group, gunPivot, snaps: [] };
   remotes.set(p.id, r);
   return r;
 }
 
-function updateRemotes(dt) {
+function updateRemotes(now) {
+  // 远端玩家按「过去 interp 毫秒」的画面显示。服务器判定打中时也是按这个时间回推，两边对齐。
+  const renderT = now - (sim ? sim.interp : 100);
   for (const r of remotes.values()) {
-    const t = r.target;
-    const g = r.group;
-    const px = g.position.x, pz = g.position.z;
-    g.position.x += (t.x - px) * 0.35;
-    g.position.z += (t.z - pz) * 0.35;
-    g.rotation.y = t.yaw;
-    r.gunPivot.rotation.x = t.pitch;
-    if (r.mixer) {
-      // 走路时播放行走动画，站着不动时停在第一帧
-      const speed = dt > 0 ? Math.hypot(g.position.x - px, g.position.z - pz) / dt : 0;
-      r.moving = r.moving + (speed - r.moving) * Math.min(1, dt * 6);
-      if (r.action) r.action.paused = r.moving < 0.25;
-      r.mixer.update(dt);
+    const s = r.snaps;
+    if (!s.length) continue;
+    let a = s[0], b = s[s.length - 1];
+    if (renderT <= s[0].t) { a = b = s[0]; }
+    else if (renderT >= s[s.length - 1].t) { a = b = s[s.length - 1]; }
+    else {
+      for (let i = 0; i + 1 < s.length; i++) {
+        if (s[i].t <= renderT && renderT <= s[i + 1].t) { a = s[i]; b = s[i + 1]; break; }
+      }
     }
+    const k = b.t === a.t ? 0 : (renderT - a.t) / (b.t - a.t);
+    const lerp = (u, v) => u + (v - u) * k;
+    r.group.position.set(lerp(a.x, b.x), 0, lerp(a.z, b.z));
+    r.group.rotation.y = lerp(a.yaw, b.yaw);
+    r.gunPivot.rotation.x = lerp(a.pitch, b.pitch);
+    r.group.visible = b.alive;
   }
 }
 
@@ -792,6 +753,9 @@ fireBtn.addEventListener("pointerup", stopFire);
 fireBtn.addEventListener("pointercancel", stopFire);
 $("scoreBtn").addEventListener("click", () => { scoreToggled = !scoreToggled; });
 $("leaveBtn").addEventListener("click", () => leave());
+$("botAddBtn").addEventListener("click", () => sendJSON({ t: "bots", delta: 1 }));
+$("botDelBtn").addEventListener("click", () => sendJSON({ t: "bots", delta: -1 }));
+$("disbandBtn").addEventListener("click", () => leave());
 $("shopBtn").addEventListener("click", () => toggleShop());
 $("shopClose").addEventListener("click", () => toggleShop(false));
 $("swapBtn").addEventListener("click", () => swapSlot());
@@ -906,40 +870,114 @@ function networkTick(now) {
   }
 }
 
-function connect(name) {
-  lastError = "";
-  setStatus(tr("正在连接…"), false);
+function openSocket() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const sock = new WebSocket(`${proto}//${location.host}${location.pathname}ws`);
   ws = sock;
-  sock.onopen = () => sock.send(JSON.stringify({ t: "join", name }));
   sock.onmessage = (ev) => {
     if (ws !== sock) return;
     let msg;
     try { msg = JSON.parse(ev.data); } catch (e) { return; }
-    if (msg.t === "welcome") onWelcome(msg);
+    if (msg.t === "lobby") onLobby(msg);
+    else if (msg.t === "welcome") onWelcome(msg);
     else if (msg.t === "state") onState(msg);
-    else if (msg.t === "error") lastError = tr(msg.text);
+    else if (msg.t === "error") onError(msg.text);
   };
-  sock.onclose = () => {
+  sock.onclose = (e) => {
     if (ws !== sock) return;
     ws = null;
-    leave(lastError || tr("连接已断开，请重新进入"));
+    playing = false;
+    inRoom = false;
+    roomInfo = null;
+    $("hud").classList.add("hidden");
+    $("menu").classList.remove("hidden");
+    if (e.code === 4401) {       // 没登录：去首页登录，登录后回到这里
+      location.href = `/?login=1&next=${encodeURIComponent(location.pathname)}`;
+      return;
+    }
+    setStatus(tr("连接已断开"), true);
+    $("reconnectBtn").classList.remove("hidden");
   };
 }
 
-function leave(message = "") {
-  playing = false;
-  input.firing = false;
-  scopeWanted = false;
-  if (document.pointerLockElement) document.exitPointerLock();
-  const sock = ws;
-  ws = null;
-  if (sock) sock.close();
-  toggleShop(false);
-  $("hud").classList.add("hidden");
-  $("menu").classList.remove("hidden");
-  setStatus(message);
+function onLobby(msg) {
+  lobby = msg;
+  if (!msg.me.room) {          // 不在房间里：显示大厅
+    if (inRoom) {
+      inRoom = false;
+      playing = false;
+      roomInfo = null;
+      input.firing = false;
+      scopeWanted = false;
+      toggleShop(false);
+      if (document.pointerLockElement) document.exitPointerLock();
+      $("hud").classList.add("hidden");
+    }
+    $("menu").classList.remove("hidden");
+  }
+  if (msg.notice) setStatus(tr(msg.notice), true);
+  renderLobby();
+}
+
+function renderLobby() {
+  const me = lobby.me || {};
+  $("myName").textContent = me.name || "";
+  $("createBtn").disabled = !me.canCreate;
+  $("createHint").textContent = me.isGuest ? tr("注册账号后才能建房") : (me.ownedRoom ? tr("你已经有一个房间了") : "");
+  const back = $("backRoomBtn");
+  back.classList.toggle("hidden", !me.ownedRoom || !!me.room);
+  const list = $("roomList");
+  list.textContent = "";
+  if (!lobby.rooms || !lobby.rooms.length) {
+    const empty = document.createElement("p");
+    empty.className = "room-empty";
+    empty.textContent = tr("现在还没有房间");
+    list.appendChild(empty);
+    return;
+  }
+  for (const r of lobby.rooms) {
+    const card = document.createElement("div");
+    card.className = "room-card";
+    const info = document.createElement("div");
+    info.className = "info";
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = r.name;
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${tr("房主")}：${r.host} · ${r.humans}/${r.capacity} ${tr("人")} · ${r.bots} ${tr("电脑")}` +
+      (r.hostOnline ? "" : ` · ${tr("房主不在线")}`);
+    info.append(title, meta);
+    const btn = document.createElement("button");
+    btn.className = "ui-btn";
+    btn.textContent = tr("加入");
+    btn.disabled = r.humans >= r.capacity;
+    btn.addEventListener("click", () => { enterFullscreen(); sendJSON({ t: "join", room: r.id }); });
+    card.append(info, btn);
+    list.appendChild(card);
+  }
+}
+
+function onError(text) {
+  if (inRoom) toast(tr(text));
+  else setStatus(tr(text), true);
+}
+
+// 房间里的小提示（显示在左上角的信息栏里，几秒后消失）
+function toast(text) {
+  const item = document.createElement("div");
+  item.className = "feed-item";
+  item.textContent = text;
+  const feed = $("feed");
+  feed.appendChild(item);
+  while (feed.children.length > 5) feed.firstChild.remove();
+  setTimeout(() => { item.classList.add("fade"); setTimeout(() => item.remove(), 700); }, 4000);
+}
+
+function leave() {
+  // 房主离开 = 解散房间，先确认一下
+  if (roomInfo && roomInfo.isHost && !confirm(tr("确定解散房间吗？房间里的人都会回到大厅。"))) return;
+  sendJSON({ t: "leave" });
 }
 
 function setStatus(text, isError = true) {
@@ -966,9 +1004,12 @@ function onWelcome(msg) {
   camera.fov = BASE_FOV;
   camera.updateProjectionMatrix();
   playing = true;
+  inRoom = true;
+  roomInfo = msg.room;
   $("menu").classList.add("hidden");
   $("hud").classList.remove("hidden");
   $("joyBase").classList.add("hidden");
+  updateRoomBar();
   updateHint();
 }
 
@@ -998,15 +1039,21 @@ function onState(msg) {
     }
   }
 
+  if (msg.room) {
+    roomInfo = msg.room;
+    updateRoomBar();
+  }
+
   players = msg.players;
   const seen = new Set();
+  const now = performance.now();
   for (const p of players) {
     names.set(p.id, p.name);
     if (p.id === myId) continue;
     seen.add(p.id);
     const r = remotes.get(p.id) || makeRemote(p);
-    r.target = p;
-    r.group.visible = p.alive;
+    r.snaps.push({ t: now, x: p.x, z: p.z, yaw: p.yaw, pitch: p.pitch, alive: p.alive });
+    if (r.snaps.length > 40) r.snaps.shift();
   }
   for (const [id, r] of remotes) {
     if (!seen.has(id)) { scene.remove(r.group); remotes.delete(id); }
@@ -1073,10 +1120,21 @@ function updateHud() {
   if (showBoard) renderBoard();
 }
 
+function updateRoomBar() {
+  const r = roomInfo;
+  $("roomBar").classList.toggle("hidden", !r);
+  if (!r) return;
+  $("roomTitle").textContent = `${r.name} · ${r.humans}${tr("人")} · ${r.bots}${tr("电脑")}`;
+  for (const id of ["botAddBtn", "botDelBtn", "disbandBtn"]) {
+    $(id).classList.toggle("hidden", !r.isHost);
+  }
+}
+
 function renderBoard() {
   const rows = [...players].sort((a, b) => (b.kills - a.kills) || (a.deaths - b.deaths));
   const tbody = $("rows");
   tbody.textContent = "";
+  const isHost = !!(roomInfo && roomInfo.isHost);
   for (const p of rows) {
     const tr_ = document.createElement("tr");
     if (p.id === myId) tr_.className = "me";
@@ -1086,6 +1144,16 @@ function renderBoard() {
       td.textContent = v;
       tr_.appendChild(td);
     }
+    // 房主可以踢掉别的人类玩家（电脑直接用「-电脑」来减）
+    const last = document.createElement("td");
+    if (isHost && !p.bot && p.id !== myId) {
+      const btn = document.createElement("button");
+      btn.className = "ui-btn kick-btn";
+      btn.textContent = tr("踢出");
+      btn.addEventListener("click", () => sendJSON({ t: "kick", id: p.id }));
+      last.appendChild(btn);
+    }
+    tr_.appendChild(last);
     tbody.appendChild(tr_);
   }
 }
@@ -1106,7 +1174,7 @@ function frame(now) {
   lastFrameAt = now;
   if (!arenaBuilt) return;
   networkTick(now);
-  updateRemotes(dt);
+  updateRemotes(now);
   updateTracers(now);
   updateParticles(dt);
 
@@ -1133,27 +1201,25 @@ function frame(now) {
   renderer.render(scene, camera);
 }
 
-// ---------------------------------------------------------------- 进入界面
+// ---------------------------------------------------------------- 大厅入口
 
-const nameInput = $("nameInput");
-try { nameInput.value = localStorage.getItem("strike-name") || ""; } catch (e) { /* 隐私模式下忽略 */ }
-let assetsReady = false;
-const joinBtn = $("joinForm").querySelector("button.primary");
-joinBtn.disabled = true;
-setStatus(tr("正在加载画面…"), false);
-loadAssets().then(() => {
-  assetsReady = true;
-  joinBtn.disabled = false;
-  setStatus("", false);
+$("createBtn").addEventListener("click", () => {
+  const name = $("roomName").value.trim().slice(0, 16);
+  enterFullscreen();     // 点击按钮是用户操作，这时进入全屏才允许
+  sendJSON({ t: "create", name });
 });
-$("joinForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  if (!assetsReady) return;
-  const name = nameInput.value.trim().slice(0, 12) || tr("匿名玩家");
-  try { localStorage.setItem("strike-name", name); } catch (e2) { /* 忽略 */ }
-  enterFullscreen();     // 点击「进入竞技场」是用户操作，这时进入全屏浏览器才允许
-  connect(name);
+$("backRoomBtn").addEventListener("click", () => {
+  enterFullscreen();
+  sendJSON({ t: "join", room: lobby.me.ownedRoom });
 });
-i18n.onChange(() => { if (playing) { updateHint(); if (shopOpen) renderShop(); updateHud(); } });
+$("reconnectBtn").addEventListener("click", () => {
+  $("reconnectBtn").classList.add("hidden");
+  setStatus(tr("正在连接…"), false);
+  openSocket();
+});
+i18n.onChange(() => { if (playing) { updateHint(); if (shopOpen) renderShop(); updateHud(); } if (lobby.me) renderLobby(); });
 
+loadAssets();                 // 环境光在后台加载，不影响进入大厅
+setStatus(tr("正在连接…"), false);
+openSocket();
 requestAnimationFrame(frame);
