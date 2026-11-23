@@ -18,6 +18,7 @@ description: 把已提交的改动 push 到自己的分支并开 PR 到 main，�
    git push -u origin <当前分支>
    ```
    然后用 GitHub 工具开 PR 到 `main`（已有 PR 就不用再开，push 后 PR 会自动更新）。标题和描述用英文。
+   **不要问负责人要不要开 PR**：负责人已明确授权，测试通过就直接开（见 `AGENTS.md` 开发流程第 3 步）。开完后订阅 PR 动态，继续下一步。
    - 负责人本人账号开的 PR：会自动 approve，CI 测试通过后自动合并。
    - 别人的 PR：要等负责人审核。告诉用户 PR 链接，请他去审核。
 
