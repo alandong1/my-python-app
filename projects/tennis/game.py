@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import math
+import random
 import secrets
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -41,6 +42,13 @@ POINT_PAUSE = 2.2          # 每分之后的停顿（秒）
 BALL_MAX_RANGE = 40.0      # 超过这个距离的球直接算出界
 
 SERVE_ORDER = {2: [0, 1], 4: [0, 2, 1, 3]}   # 发球顺序（座位号）
+
+AI_ID = -1                 # 电脑座位的「用户 id」（不会和真实用户重复）
+AI_NAME = "电脑"
+AI_SERVE_DELAY = 1.0       # 电脑发球方：进入发球状态后停多久再抛球（秒）
+AI_MISS_WAIT = 0.6         # 电脑这次没去接球，之后多久再重新判断（秒）
+AI_HIT_CHANCE = 0.85       # 电脑够到球时击球的概率（其余时间算失误）
+AI_STROKES = [("flat", 40), ("top", 25), ("back", 15), ("side_l", 10), ("side_r", 10)]
 
 # 球种：速度系数、上旋强度（-1 下旋 .. 1 上旋）、侧旋（-1 左 .. 1 右）、
 # 落点深度（米，从网算起的目标距离）、过网最低高度
@@ -299,6 +307,7 @@ class Seat:
     f: float = 0.0        # 摇杆：前（朝对面）
     r: float = 0.0        # 摇杆：右
     cooldown: float = 0.0
+    is_ai: bool = False   # 电脑座位（由服务器操作，规则和真人一样）
 
 
 @dataclass
@@ -321,13 +330,23 @@ class Room:
     last_seat: Optional[int] = None  # 最后击球的座位
     bounces: int = 0                 # 球在对方场地落地的次数（没人回击时）
     events: List[dict] = field(default_factory=list)   # 这一帧发生的事（发给前端播音效）
+    ai: bool = False                 # 人机房间：2 号位是电脑，只能单打，不出现在大厅
+    rng: random.Random = field(default_factory=random.Random)
+    ai_timer: float = 0.0            # 电脑发球方：已经等了多久
+    ai_wait: float = 0.0             # 电脑这次没去接球：还要等多久再判断
 
     def __post_init__(self):
         cap = 2 if self.mode == "single" else 4
+        if self.ai and cap != 2:
+            raise RoomError("人机对战只支持单打")
         if not self.seats:
             self.seats = [None] * cap
         # 房主自动占 1 号位（建房时就占好，别人抢不走）
         self.seats[0] = self._new_seat(0, self.host_id, self.host_name)
+        if self.ai:
+            # 人机房间：电脑直接坐在 2 号位，房间立刻满员
+            self.seats[1] = self._new_seat(1, AI_ID, AI_NAME)
+            self.seats[1].is_ai = True
 
     # -------------------------------------------------- 座位
 
@@ -345,6 +364,12 @@ class Room:
             z = -2.4 if k == 0 else 2.4
         x = -9.0 if team == 0 else 9.0
         return Seat(index, team, user_id, name, x=x, z=z)
+
+    def ai_seat(self) -> Optional[Seat]:
+        for s in self.seats:
+            if s and s.is_ai:
+                return s
+        return None
 
     def seat_of(self, user_id: int) -> Optional[Seat]:
         for s in self.seats:
@@ -392,6 +417,7 @@ class Room:
         """轮到新的一分：发球人移到发球位置，球握在手里。"""
         order = SERVE_ORDER[self.capacity]
         self.server_seat = order[self.score.total_games % len(order)]
+        self.ai_timer = 0.0
         self.phase = "serve_wait"
         self.serve_pending = False
         self.last_seat = None
@@ -502,6 +528,8 @@ class Room:
     def tick(self, dt: float) -> None:
         if self.status != "playing":
             return
+        if self.ai:
+            self._ai_step(dt)
         for seat in self.seats:
             if seat:
                 seat.cooldown = max(0.0, seat.cooldown - dt)
@@ -520,6 +548,70 @@ class Room:
                 break
             for kind, x, z in step_ball(self.ball, h):
                 self._on_ball_event(kind, x, z)
+
+    def _ai_step(self, dt: float):
+        """电脑的决策：每个 tick 调用一次。它只用摇杆和挥拍，和真人走同样的规则。"""
+        seat = self.ai_seat()
+        if seat is None:
+            return
+        b = self.ball
+        is_server = seat.index == self.server_seat
+
+        if self.phase == "serve_wait" and is_server:
+            self.ai_timer += dt
+            if self.ai_timer >= AI_SERVE_DELAY:
+                self.ai_timer = 0.0
+                try:
+                    self.swing(AI_ID, "top")          # 抛球
+                except RoomError:
+                    pass
+            return
+        if self.phase == "toss" and is_server:
+            # 球下落到合适的高度时发球（在窗口内会每个 tick 试一次，只会成功一次）
+            if b.vy < 0 and 1.8 <= b.y <= 2.8:
+                try:
+                    self.swing(AI_ID, self._ai_pick_stroke(), self._ai_aim(), 0.0)
+                except RoomError:
+                    pass
+            return
+
+        # 移动：来球时跑到球的落点附近，否则站在基准位置
+        if self.phase == "rally" and b.vx < 0:       # 球朝电脑这一边飞
+            tx = clamp(b.x + b.vx * 0.25, 0.6, 12.0)
+            tz = b.z + b.vz * 0.25
+        else:
+            tx, tz = 8.0, 0.0
+        dx, dz = tx - seat.x, tz - seat.z
+        fx, fz = (1.0, 0.0) if seat.team == 0 else (-1.0, 0.0)   # 朝对面
+        rx, rz = -fz, fx                                          # 右手边
+        self.set_stick(AI_ID,
+                       clamp((dx * fx + dz * fz) * 2, -1, 1),
+                       clamp((dx * rx + dz * rz) * 2, -1, 1))
+
+        # 击球：来球在够得着的范围内，就击球（偶尔失误）
+        if self.phase == "rally" and seat.index != self.last_seat and seat.cooldown <= 0:
+            if self.ai_wait > 0:
+                self.ai_wait -= dt
+                return
+            dist = math.hypot(b.x - seat.x, b.z - seat.z)
+            if dist < REACH * 0.9 and REACH_MIN_Y <= b.y <= REACH_MAX_Y:
+                if self.rng.random() < AI_HIT_CHANCE:
+                    try:
+                        self.swing(AI_ID, self._ai_pick_stroke(), self._ai_aim(),
+                                   self.rng.uniform(-0.2, 0.6))
+                    except RoomError:
+                        pass
+                else:
+                    self.ai_wait = AI_MISS_WAIT
+
+    def _ai_pick_stroke(self) -> str:
+        names = [n for n, _ in AI_STROKES]
+        weights = [w for _, w in AI_STROKES]
+        return self.rng.choices(names, weights)[0]
+
+    def _ai_aim(self) -> float:
+        """电脑的瞄准有随机误差：左右偏差在 ±0.8 以内。"""
+        return self.rng.uniform(-0.8, 0.8)
 
     def _move(self, seat: Seat, dt: float):
         if seat.f == 0 and seat.r == 0:
@@ -582,6 +674,7 @@ class Room:
 
     def _serve_fault(self, reason: str):
         self.serve_pending = False
+        self.ai_timer = 0.0
         if self.serve_attempt == 1:
             self.serve_attempt = 2
             self.phase = "serve_wait"
@@ -642,6 +735,7 @@ class Room:
             "modeName": "单打" if self.mode == "single" else "双打",
             "status": self.status, "host": self.host_name,
             "players": self.player_count(), "capacity": self.capacity,
+            "ai": self.ai,
         }
 
     def snapshot(self) -> dict:
@@ -660,6 +754,7 @@ class Room:
                      "top": round(b.top, 2), "side": round(b.side, 2)},
             "seats": [None if s is None else {
                 "index": s.index, "team": s.team, "userId": s.user_id, "name": s.name,
+                "isAi": s.is_ai,
                 "x": round(s.x, 3), "z": round(s.z, 3),
             } for s in self.seats],
             "events": events,
