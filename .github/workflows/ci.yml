@@ -1,5 +1,8 @@
-# 自动测试：每个 PR、以及合并进 main 之后，都在 GitHub 的服务器上跑一遍全部测试。
-# 分支保护要求这里的检查通过，PR 才能合并。
+# 自动测试：每个 PR、以及合并进 main 之后，都在 GitHub 的服务器上跑测试。
+# 分支保护要求这里的检查（scope、test (3.9)、test (3.12)）通过，PR 才能合并。
+#
+# 跑哪些测试由 scripts/changes.py 按改动决定：只改了一个项目就只跑平台测试 + 这个项目的测试；
+# 改了平台代码就全部跑。合并进 main 之后总是全部跑一遍。
 name: CI
 
 on:
@@ -11,7 +14,41 @@ permissions:
   contents: read
 
 jobs:
+  # 算出要跑哪些测试
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.pick.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: pick
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE" ]; then
+            targets=$(python3 scripts/changes.py tests --base "$BASE")
+          else
+            targets="."
+          fi
+          echo "要跑的测试：$targets"
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+  # 一个 PR 只能改一个项目，或者只改平台
+  scope:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/changes.py scope --base "$BASE"
+
   test:
+    needs: changes
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -23,4 +60,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -q
+      - env:
+          TARGETS: ${{ needs.changes.outputs.targets }}
+        run: python -m pytest -q $TARGETS
