@@ -76,6 +76,7 @@
 - ✅ **自动同步落后的 PR**（2026-11-23，`.github/workflows/sync-prs.yml`）：`main` 有新提交时，自动把 `main` 合并进所有落后的 PR（跳过 fork、草稿、`needs-human`），触发 CI 重新测试，负责人的 PR 重新 approve。有冲突的 PR 留言提醒作者手动解决。
   - 原因：分支保护要求「合并前分支必须是最新」，多个 agent 并行时，一个 PR 合并后其他 PR 都会落后卡住。
   - 为什么要手动触发 CI：GitHub 规定 workflow 用自带权限推送的提交不会触发其他 workflow（防止循环），只有 `workflow_dispatch` 例外。
+  - 触发时机：每 10 分钟检查一次，加上负责人手动合并时。原因同上：自动合并是 `github-actions` 机器人完成的，它推送到 `main` 不会触发「main 有新提交」类的 workflow。
 - ✅ **自动修复次数上限**（2026-11-23）：同一个 PR 的 CI 失败满 3 次，自动打 `needs-human` 标签、关闭自动合并、通知负责人；AI 看到标签必须停手。负责人去掉标签后计数清零。
   - 原因：AI agent 订阅了自己的 PR，CI 失败会唤醒它去修；如果一直修不好，会无限循环消耗 token。规则写在 `AGENTS.md`，并由 `ci-failure-limit.yml` 强制执行，不只依赖 AI 自觉。
 - ✅ **自动测试（CI）**（`.github/workflows/ci.yml`）：每个 PR 在 Python 3.9（本地版本）和 3.12（Render 版本）上跑全部测试，通过才能合并。
