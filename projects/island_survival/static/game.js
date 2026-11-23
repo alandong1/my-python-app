@@ -14,6 +14,8 @@ const keys = new Set();
 let joy = { x: 0, y: 0 };
 let lastInvKey = '', toastTimer = 0;
 const shared = {};
+let lastFrame = 0;
+const focus = new THREE.Vector3();   // 镜头盯着的点（平滑后的位置）
 
 // ------------------------------------------------------------ 连接与消息
 
@@ -75,7 +77,8 @@ function startGame(state) {
     buildTerrain();
     setupInput();
     requestAnimationFrame(frame);
-    setInterval(() => send({ type: 'move', ...moveVector() }), 100);
+    sendMove();
+    setInterval(sendMove, 100);
   }
   applyState(state);
 }
@@ -420,13 +423,19 @@ function setupInput() {
     if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
       keys.add(k);
       e.preventDefault();
+      sendMove();
       return;
     }
     const map = { e: 'interact', b: 'build_fire', c: 'cook', x: 'craft', h: 'heal' };
     if (map[k]) send({ type: 'action', action: map[k] });
   });
-  window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
-  window.addEventListener('blur', () => keys.clear());
+  window.addEventListener('keyup', (e) => { keys.delete(e.key.toLowerCase()); sendMove(); });
+  window.addEventListener('blur', () => { keys.clear(); sendMove(); });
+
+  // 禁止双击放大、捏合缩放（手机上会打断操作）
+  for (const type of ['dblclick', 'gesturestart', 'gesturechange']) {
+    document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+  }
 
   document.querySelectorAll('#actions button').forEach((b) => {
     b.addEventListener('click', () => send({ type: 'action', action: b.dataset.action }));
@@ -439,12 +448,17 @@ function setupInput() {
 
   // 鼠标拖动转视角
   const canvas = $('scene');
-  canvas.addEventListener('pointerdown', (e) => { dragging = true; lastX = e.clientX; });
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true; lastX = e.clientX;
+    canvas.setPointerCapture(e.pointerId);     // 拖出画布也不丢
+  });
   window.addEventListener('pointerup', () => { dragging = false; });
+  window.addEventListener('pointercancel', () => { dragging = false; });
   window.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     yaw -= (e.clientX - lastX) * 0.008;
     lastX = e.clientX;
+    sendMove();                                // 转向后，移动方向立刻跟着变
   });
 
   // 手机：虚拟摇杆
@@ -464,10 +478,18 @@ function setupInput() {
     if (len > max) { dx = dx / len * max; dy = dy / len * max; }
     joy = { x: dx / max, y: dy / max };
     knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    sendMove();
   });
-  const endJoy = () => { joyId = null; joy = { x: 0, y: 0 }; knob.style.transform = ''; };
+  const endJoy = () => { joyId = null; joy = { x: 0, y: 0 }; knob.style.transform = ''; sendMove(); };
   joyEl.addEventListener('pointerup', endJoy);
   joyEl.addEventListener('pointercancel', endJoy);
+}
+
+// 把当前的移动方向发给服务器；按键、拖动、摇杆变化时立即调用，不等下一次定时发送
+function sendMove() {
+  if (!me && !ws) return;
+  const v = moveVector();
+  send({ type: 'move', dx: v.dx, dz: v.dz });
 }
 
 // 根据按键和摇杆，算出在世界里走的方向（相对镜头）
@@ -487,30 +509,36 @@ function frame(now) {
   requestAnimationFrame(frame);
   if (!me || !scene) return;
   const t = now / 1000;
+  // 按真实经过的时间平滑（和帧率无关），服务器每 0.1 秒给一次位置，这里把它们连成顺滑的动作
+  const dt = lastFrame ? Math.min(0.05, (now - lastFrame) / 1000) : 0.016;
+  lastFrame = now;
+  const k = 1 - Math.exp(-dt * 14);
 
-  // 玩家和动物：从当前位置慢慢走向服务器给的位置，让动作看起来顺滑
   for (const mesh of players.values()) {
     const dx = mesh.userData.tx - mesh.position.x, dz = mesh.userData.tz - mesh.position.z;
-    mesh.position.x += dx * 0.3;
-    mesh.position.z += dz * 0.3;
+    mesh.position.x += dx * k;
+    mesh.position.z += dz * k;
     mesh.position.y = terrainHeight(mesh.position.x, mesh.position.z);
     if (Math.hypot(dx, dz) > 0.02) mesh.rotation.y = Math.atan2(dx, dz);
-    mesh.rotation.z += ((mesh.userData.dead ? Math.PI / 2 : 0) - mesh.rotation.z) * 0.2;
+    mesh.rotation.z += ((mesh.userData.dead ? Math.PI / 2 : 0) - mesh.rotation.z) * Math.min(1, dt * 10);
   }
   for (const mesh of animals.values()) {
-    mesh.position.x += (mesh.userData.tx - mesh.position.x) * 0.3;
-    mesh.position.z += (mesh.userData.tz - mesh.position.z) * 0.3;
+    mesh.position.x += (mesh.userData.tx - mesh.position.x) * k;
+    mesh.position.z += (mesh.userData.tz - mesh.position.z) * k;
     mesh.position.y = terrainHeight(mesh.position.x, mesh.position.z);
   }
   for (const g of fires.values()) {
     g.children[0].scale.setScalar(0.9 + 0.15 * Math.sin(t * 12 + g.position.x));
   }
 
-  // 镜头跟着自己走
-  const target = new THREE.Vector3(me.x, 1.0, me.z);
+  // 镜头盯着自己「平滑后」的模型，而不是服务器的原始位置，所以不会一顿一顿地跳
+  const mine = players.get(myId);
+  const fx = mine ? mine.position.x : me.x;
+  const fz = mine ? mine.position.z : me.z;
+  focus.set(fx, terrainHeight(fx, fz) + 1.0, fz);
   const dist = 9, height = 5;
-  const want = new THREE.Vector3(target.x + Math.sin(yaw) * dist, target.y + height, target.z + Math.cos(yaw) * dist);
-  camera.position.lerp(want, 0.15);
-  camera.lookAt(target);
+  const want = new THREE.Vector3(focus.x + Math.sin(yaw) * dist, focus.y + height, focus.z + Math.cos(yaw) * dist);
+  camera.position.lerp(want, 1 - Math.exp(-dt * 8));
+  camera.lookAt(focus);
   renderer.render(scene, camera);
 }
