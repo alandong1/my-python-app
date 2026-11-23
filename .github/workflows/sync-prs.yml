@@ -9,6 +9,10 @@
 #
 # 跳过：别人 fork 来的 PR（负责人人工处理）、草稿 PR、带 needs-human 标签的 PR。
 # 有冲突的 PR 无法自动同步：留言提醒，由 PR 的作者（agent）手动合并 main、解决冲突。
+#
+# 机器人推送的合并提交会触发一次 CI，但公开仓库会把机器人当作外部贡献者，
+# 这次 CI 停在「等待维护者批准」（action_required），而且会挡住合并。
+# 所以对负责人本人的 PR，同步后把这种等批准的 CI 直接批准掉（只批准 PR 当前最新提交上的）。
 name: Sync PRs with main
 
 on:
@@ -49,7 +53,28 @@ jobs:
                     | [.number, .headRefName, .headRefOid, .author.login] | @tsv')
           if [ -z "$prs" ]; then echo "没有需要同步的 PR"; exit 0; fi
 
+          # 批准 PR 最新提交上「等待维护者批准」的 CI；最多等 tries*3 秒让它出现
+          approve_waiting_runs() {
+            local num="$1" branch="$2" sha="$3" tries="$4" ids=""
+            for _ in $(seq 1 "$tries"); do
+              ids=$(gh run list --branch "$branch" --limit 20 --json databaseId,conclusion,headSha \
+                -q ".[] | select(.conclusion == \"action_required\" and .headSha == \"$sha\") | .databaseId")
+              [ -n "$ids" ] && break
+              [ "$tries" -gt 1 ] && sleep 3
+            done
+            for id in $ids; do
+              if gh api -X POST "repos/$GH_REPO/actions/runs/$id/approve" >/dev/null 2>&1; then
+                echo "#$num 批准了等待中的 CI（run $id）"
+              else
+                echo "#$num ⚠️ 无法批准 CI（run $id），需要负责人在 PR 页面点 Approve and run"
+              fi
+            done
+          }
+
           while IFS=$'\t' read -r num branch head author; do
+            # 之前同步留下、还卡在「等批准」的 CI，先处理掉
+            if [ "$author" = "$OWNER" ]; then approve_waiting_runs "$num" "$branch" "$head" 1; fi
+
             behind=$(gh api "repos/$GH_REPO/compare/$head...$MAIN_SHA" -q .ahead_by)
             if [ "$behind" = "0" ]; then echo "#$num 已经是最新"; continue; fi
 
@@ -76,6 +101,7 @@ jobs:
             gh workflow run ci.yml --ref "$branch" -f base="$MAIN_SHA"
             if [ "$author" = "$OWNER" ]; then
               gh pr review "$num" --approve --body "同步了最新的 main，按规则重新 approve（负责人本人的 PR）。"
+              approve_waiting_runs "$num" "$branch" "$new" 10
             fi
             echo "#$num 已同步到 ${new:0:7}，已触发 CI"
           done <<< "$prs"
