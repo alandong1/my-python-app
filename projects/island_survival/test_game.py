@@ -43,6 +43,16 @@ def passed(g: Game, seconds: float) -> None:
     g.time += seconds
 
 
+def interact_and_wait(g: Game, p, max_ticks: int = 400) -> None:
+    """按一下互动，然后让时间走，直到进度条走完（或者动作被取消）。"""
+    g.act(p, "interact", {})
+    for _ in range(max_ticks):
+        if p.work is None:
+            return
+        g.tick()
+    raise AssertionError("动作一直没有完成")
+
+
 def build(g: Game, p, kind: str, fx: float = 1.0, fz: float = 0.0) -> None:
     g.act(p, "build", {"kind": kind, "fx": fx, "fz": fz})
 
@@ -97,7 +107,7 @@ def test_player_cannot_walk_into_deep_sea(g):
 
 def test_tree_blocks_movement(spot):
     g, p, x, z = spot
-    tree = Resource(id=g._new_id(), kind="tree", x=x + 1, z=z, hp=3)
+    tree = Resource(id=len(g.res), kind="tree", x=x + 1, z=z, hp=3)
     g.res.append(tree)
     g.tree_at[z * W + x + 1] = tree.id
     place(p, x + 0.5, z + 0.5)
@@ -111,12 +121,12 @@ def test_tree_blocks_movement(spot):
 
 def test_chop_tree_with_stone_axe_gives_more_wood_then_regrows(spot):
     g, p, x, z = spot
-    tree = Resource(id=g._new_id(), kind="tree", x=x + 1, z=z, hp=3)
+    tree = Resource(id=len(g.res), kind="tree", x=x + 1, z=z, hp=3)
     g.res.append(tree)
     g.tree_at[z * W + x + 1] = tree.id
     p.inv = {"stone_axe": 1}
     for _ in range(3):
-        g.act(p, "interact", {})
+        interact_and_wait(g, p)
         passed(g, 1)
     assert p.inv["wood"] == 6                  # 石斧：每下 2 个木材
     assert tree.present is False and (z * W + x + 1) not in g.tree_at
@@ -127,33 +137,37 @@ def test_chop_tree_with_stone_axe_gives_more_wood_then_regrows(spot):
 
 def test_rock_gives_stone_by_hand_and_more_with_stone_pick(spot):
     g, p, x, z = spot
-    rock = Resource(id=g._new_id(), kind="rock", x=x + 1, z=z, hp=3)
+    rock = Resource(id=len(g.res), kind="rock", x=x + 1, z=z, hp=3)
     g.res.append(rock)
     g.rock_at[z * W + x + 1] = rock.id
-    g.act(p, "interact", {})                     # 空手：1 块石头
+    interact_and_wait(g, p)                     # 空手：1 块石头
     assert p.inv["stone"] == 1
     passed(g, 1)
     p.inv["stone_pick"] = 1
-    g.act(p, "interact", {})                     # 有石镐：2 块
+    interact_and_wait(g, p)                     # 有石镐：2 块
     assert p.inv["stone"] == 3
 
 
 def test_gather_small_resources(spot):
     g, p, x, z = spot
-    shell = Resource(id=g._new_id(), kind="shell", x=x, z=z, hp=1)
+    shell = Resource(id=len(g.res), kind="shell", x=x, z=z, hp=1)
     g.res.append(shell)
     place(p, x + 0.5, z + 0.5)
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     assert p.inv["shell"] == 1 and shell.present is False
 
 
-def test_action_cooldown_stops_spam(spot):
+def test_pressing_interact_twice_does_not_stack_work(spot):
     g, p, x, z = spot
-    tree = Resource(id=g._new_id(), kind="tree", x=x + 1, z=z, hp=3)
+    tree = Resource(id=len(g.res), kind="tree", x=x + 1, z=z, hp=3)
     g.res.append(tree)
     g.tree_at[z * W + x + 1] = tree.id
     g.act(p, "interact", {})
-    g.act(p, "interact", {})
+    g.act(p, "interact", {})                     # 正在砍，再按不会多砍一下
+    for _ in range(400):
+        if p.work is None:
+            break
+        g.tick()
     assert p.inv["wood"] == 1
 
 
@@ -166,7 +180,7 @@ def test_hunt_rabbit_and_it_flees(spot):
     assert math.hypot(rabbit.x - p.x, rabbit.z - p.z) > before
     rabbit.x, rabbit.z = p.x + 1, p.z
     for _ in range(2):
-        g.act(p, "interact", {})
+        interact_and_wait(g, p)
         passed(g, 1)
     assert rabbit not in g.animals and p.inv["raw_meat"] == 1
 
@@ -176,7 +190,7 @@ def test_spear_kills_rabbit_in_one_hit(spot):
     rabbit = Animal(id=g._new_id(), kind="rabbit", x=x + 1.5, z=z + 0.5, hp=2)
     g.animals.append(rabbit)
     p.inv = {"spear": 1}
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     assert rabbit not in g.animals
 
 
@@ -187,12 +201,9 @@ def test_fishing_on_shallow_water(g, monkeypatch):
     p = g.join(1, "甲", "chef")
     place(p, spot[0] + 0.5, spot[1] + 0.5)
     monkeypatch.setattr(g.rng, "random", lambda: 0.0)
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     assert p.inv["raw_fish"] == 1
-    with pytest.raises(GameError):
-        g.act(p, "interact", {})
-    passed(g, 2.1)
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)                      # 钓鱼之间有冷却，但进度条本身会等够时间
     assert p.inv["raw_fish"] == 2
 
 
@@ -255,7 +266,7 @@ def test_build_needs_materials_and_clear_land(spot):
     with pytest.raises(GameError):
         build(g, p, "workbench")
     p.inv = {"wood": 6, "stone": 2}
-    tree = Resource(id=g._new_id(), kind="tree", x=x + 2, z=z, hp=3)
+    tree = Resource(id=len(g.res), kind="tree", x=x + 2, z=z, hp=3)
     g.res.append(tree)
     g.tree_at[z * W + x + 2] = tree.id
     with pytest.raises(GameError):
@@ -428,7 +439,7 @@ def test_pickup_furniture_returns_it(spot):
     g.act(p, "enter", {})
     p.inv = {"chair": 1}
     g.act(p, "place", {"item": "chair", "fx": 0, "fz": -1})
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     assert house.furniture == [] and p.inv["chair"] == 1
 
 
@@ -436,7 +447,7 @@ def test_interact_enters_house_when_close(spot):
     g, p, x, z = spot
     house = build_house(g, p)
     place(p, house.x + 1.5, house.z + 3.6)
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     assert p.house == house.id
 
 
@@ -472,7 +483,7 @@ def test_low_stats_drain_health_and_death_then_respawn(g):
     g.tick()
     assert p.dead is True and p.health == 0
     with pytest.raises(GameError):
-        g.act(p, "interact", {})
+        interact_and_wait(g, p)
     g.act(p, "respawn", {})
     assert p.dead is False and p.health == 100 and p.hunger == 100
 
@@ -592,7 +603,7 @@ def _spot_for_resource(g, kind):
     x, z = open_spot(g)
     p = g.join(20 + len(g.players), "探", "chef")
     place(p, x + 0.5, z + 0.5)
-    r = Resource(id=g._new_id(), kind=kind, x=x + 1, z=z, hp=C.RESOURCES[kind][1])
+    r = Resource(id=len(g.res), kind=kind, x=x + 1, z=z, hp=C.RESOURCES[kind][1])
     g.res.append(r)
     if kind == "rock":
         g.rock_at[z * W + x + 1] = r.id
@@ -609,7 +620,7 @@ def test_every_resource_can_be_gathered_with_empty_hands(g, kind, item):
     """空手也能采到每一种资源（不需要工具），否则会出现「要工具 → 要材料 → 要工具」的死循环。"""
     p = _spot_for_resource(g, kind)
     assert p.inv == {}
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     assert p.inv.get(item, 0) >= 1, f"空手采{C.RESOURCES[kind][0]}拿不到{C.ITEMS[item]}"
 
 
@@ -617,9 +628,9 @@ def test_bare_hands_can_hunt_rabbit(spot):
     g, p, x, z = spot
     rabbit = Animal(id=g._new_id(), kind="rabbit", x=x + 1.5, z=z + 0.5, hp=2)
     g.animals.append(rabbit)
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     passed(g, 1)
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     assert p.inv.get("raw_meat", 0) == 1
 
 
@@ -628,7 +639,7 @@ def test_bare_hands_can_get_iron_ore_eventually(g):
     p = g.join(30, "矿", "chef")
     got = 0
     for _ in range(300):
-        rock = Resource(id=g._new_id(), kind="rock", x=10, z=10, hp=3)
+        rock = Resource(id=len(g.res), kind="rock", x=10, z=10, hp=3)
         g._gather(p, rock)
         got = p.inv.get("iron_ore", 0)
         if got:
@@ -704,12 +715,12 @@ def test_entering_house_beats_chopping_nearby_tree(spot):
     p.inv = {"wood": 20, "stone": 6, "rope": 2}
     build(g, p, "house", fx=0.0, fz=1.0)
     house = next(b for b in g.buildings.values() if b.kind == "house")
-    tree = Resource(id=g._new_id(), kind="tree", x=int(house.x) + 4, z=z, hp=3)
+    tree = Resource(id=len(g.res), kind="tree", x=int(house.x) + 4, z=z, hp=3)
     g.res.append(tree)
     g.tree_at[z * W + int(house.x) + 4] = tree.id
     place(p, house.x + 1.5, house.z + 3.6)       # 站在门口，旁边有树
     p.x = house.x + 3.2
-    g.act(p, "interact", {})
+    interact_and_wait(g, p)
     assert p.house == house.id and tree.present is True
 
 
@@ -730,7 +741,59 @@ def test_cooking_uses_a_lit_campfire_even_if_an_unlit_one_is_closer(spot):
 def test_cannot_build_on_top_of_a_resource(spot):
     g, p, x, z = spot
     p.inv = {"wood": 6, "stone": 2}
-    bush = Resource(id=g._new_id(), kind="bush", x=x + 2, z=z, hp=2)
+    bush = Resource(id=len(g.res), kind="bush", x=x + 2, z=z, hp=2)
     g.res.append(bush)
     with pytest.raises(GameError):
         build(g, p, "workbench")                  # 面前是浆果丛
+
+
+# ------------------------------------------------------------ 进度条：要走完才成功，走开就取消
+
+def test_work_takes_time_and_gives_nothing_until_done(spot):
+    g, p, x, z = spot
+    tree = Resource(id=len(g.res), kind="tree", x=x + 1, z=z, hp=3)
+    g.res.append(tree)
+    g.tree_at[z * W + x + 1] = tree.id
+    g.act(p, "interact", {})
+    assert p.work is not None and p.inv.get("wood", 0) == 0
+    for _ in range(10):                          # 过了 1 秒，还没砍完
+        g.tick()
+    assert p.work is not None and p.inv.get("wood", 0) == 0
+    assert 0.2 < g.view(p, False)["me"]["work"]["progress"] < 0.5
+
+
+def test_moving_cancels_the_work(spot):
+    g, p, x, z = spot
+    tree = Resource(id=len(g.res), kind="tree", x=x + 1, z=z, hp=3)
+    g.res.append(tree)
+    g.tree_at[z * W + x + 1] = tree.id
+    g.act(p, "interact", {})
+    g.set_move(p, 0, 1)
+    g.tick()
+    assert p.work is None and p.inv.get("wood", 0) == 0
+    assert any("走开" in m for m in p.events)
+
+
+def test_axes_make_chopping_faster(spot):
+    g, p, x, z = spot
+    base = g._work_time(p, "tree")
+    p.inv = {"stone_axe": 1}
+    assert g._work_time(p, "tree") < base
+    p.inv = {"iron_axe": 1}
+    assert g._work_time(p, "tree") < g._work_time(p, "bush") * 3   # 铁斧砍树比普通更快
+    assert g._work_time(p, "tree") < base * 0.6
+
+
+def test_chopping_is_slower_than_gathering_berries(spot):
+    g, p, x, z = spot
+    assert g._work_time(p, "tree") > g._work_time(p, "bush")
+
+
+def test_working_on_a_target_stops_it_fleeing(spot):
+    g, p, x, z = spot
+    rabbit = Animal(id=g._new_id(), kind="rabbit", x=x + 1.5, z=z + 0.5, hp=2)
+    g.animals.append(rabbit)
+    g.act(p, "interact", {})
+    for _ in range(5):                            # 半秒：不被打的兔子会跑得远远的
+        g.tick()
+    assert math.hypot(rabbit.x - p.x, rabbit.z - p.z) < 1.8

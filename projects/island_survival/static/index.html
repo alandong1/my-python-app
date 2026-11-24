@@ -68,11 +68,7 @@
 
     <!-- 底部按钮：常驻的只有合成和建造；其他的只在附近有对应东西时才显示（见 game.js 的 updateActions） -->
     <div id="actions">
-      <button data-action="craft" title="T">合成 T</button>
       <button data-action="build" title="B">建造 B</button>
-      <button data-action="cook" title="C" hidden>烹饪 C</button>
-      <button data-action="fuel" title="F" hidden>加柴 F</button>
-      <button data-action="upgrade" title="U" hidden>升级 U</button>
       <button data-action="farm" title="G" hidden>种田 G</button>
       <button data-action="heal" title="H" hidden>治疗 H</button>
       <button data-action="exit" title="Q" hidden>出屋 Q</button>
@@ -81,6 +77,7 @@
     <div id="menu" hidden>
       <div class="panel menu-panel">
         <div class="menu-head"><h2 id="menuTitle"></h2><button id="menuClose">关闭</button></div>
+        <div id="menuTabs" class="tabs" hidden></div>
         <ul id="menuList"></ul>
       </div>
     </div>

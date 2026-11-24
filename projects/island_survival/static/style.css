@@ -138,3 +138,8 @@ button:disabled { opacity: 0.5; cursor: default; }
   background: rgba(47, 125, 91, 0.95); color: #fff; font-size: 15px; font-weight: 600;
   padding: 8px 16px; border-radius: 999px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
   white-space: nowrap; z-index: 5; }
+
+/* 面板的标签页：建造 / 合成 / 升级 */
+.tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.tabs .tab { background: var(--bar-bg); color: var(--ink); padding: 6px 12px; }
+.tabs .tab.on { background: var(--accent); color: #fff; }

@@ -73,6 +73,7 @@ class Player:
     house: Hook = None       # 在哪间屋子里（房子的编号），None 表示在室外
     ox: float = 0.0          # 进屋前在室外的位置，出屋时回到这里
     oz: float = 0.0
+    work: Optional[dict] = None   # 正在做的事（砍树、采集……）：进度条走完才成功；不保存进存档
 
 
 @dataclass
@@ -368,7 +369,10 @@ class Game:
     # ------------------------------------------------------------ 互动（E）
 
     def interact(self, p: Player) -> None:
-        """E 键：自动选最近的目标。屋里：拿家具；室外：动物、树、其他资源、房子、钓鱼。"""
+        """E 键（室外）：开始做最近的事。砍树、采集、攻击、钓鱼要花时间，进度条走完才成功。
+        门口和房子直接进屋；屋里拿家具是立刻完成的。"""
+        if p.work is not None:
+            return
         if self.time < p.next_action:
             return
         if p.house is not None:
@@ -376,24 +380,72 @@ class Game:
         animal = min((a for a in self.animals if self._dist(p, a.x, a.z) <= 2.0),
                      key=lambda a: self._dist(p, a.x, a.z), default=None)
         if animal:
-            p.next_action = self.time + ACTION_COOLDOWN
-            return self._hit_animal(p, animal)
+            return self._start_work(p, "animal", animal.id, animal.x, animal.z)
         if self._nearest_building(p, ("house",), 2.2):      # 站在门口，优先进屋
             return self.enter(p)
         tree = self._nearest_resource(p, ("tree",), 2.5)
         if tree:
-            p.next_action = self.time + ACTION_COOLDOWN
-            return self._chop(p, tree)
+            return self._start_work(p, "tree", tree.id, tree.x + 0.5, tree.z + 0.5)
         plant = self._nearest_resource(p, tuple(k for k in C.RESOURCES if k != "tree"), 2.0)
         if plant:
-            p.next_action = self.time + ACTION_COOLDOWN
-            return self._gather(p, plant)
-        house = self._nearest_building(p, ("house",), 3.0)
-        if house:
+            return self._start_work(p, plant.kind, plant.id, plant.x + 0.5, plant.z + 0.5)
+        if self._nearest_building(p, ("house",), 3.0):
             return self.enter(p)
         if self._near_water(p.x, p.z):
-            return self._fish(p)
+            return self._start_work(p, "fish", None, p.x, p.z)
         raise GameError("附近没有可以互动的东西。树、石头、动物、房子，或者浅海边")
+
+    def _start_work(self, p: Player, kind: str, target: Optional[int], x: float, z: float) -> None:
+        p.work = {"kind": kind, "target": target, "x": x, "z": z,
+                  "start": self.time, "dur": self._work_time(p, kind)}
+
+    def _work_time(self, p: Player, kind: str) -> float:
+        base = C.WORK_TIME[kind]
+        if kind == "tree":
+            speed = next((C.TREE_TOOL_SPEED[t] for t in ("iron_axe", "stone_axe") if p.inv.get(t, 0) > 0), 1.0)
+            return base * speed
+        if kind == "rock":
+            speed = next((C.ROCK_TOOL_SPEED[t] for t in ("iron_pick", "stone_pick") if p.inv.get(t, 0) > 0), 1.0)
+            return base * speed
+        if kind == "animal" and p.inv.get("spear", 0) > 0:
+            return base * C.SPEAR_SPEED
+        return base
+
+    def _work_target_ok(self, p: Player, w: dict) -> bool:
+        if w["kind"] == "fish":
+            return self._near_water(p.x, p.z)
+        if w["kind"] == "animal":
+            a = next((a for a in self.animals if a.id == w["target"]), None)
+            return a is not None and self._dist(p, a.x, a.z) <= 3.0
+        r = next((r for r in self.res if r.id == w["target"]), None)
+        return r is not None and r.present and self._dist(p, r.x + 0.5, r.z + 0.5) <= 3.0
+
+    def _tick_work(self, p: Player) -> None:
+        """每个 tick 推进一次正在做的事：走开、目标没了就取消；进度条走完就完成。"""
+        w = p.work
+        if abs(p.move_x) > 0.05 or abs(p.move_z) > 0.05:
+            p.work = None
+            return self._msg(p, "你走开了，动作停下了")
+        if not self._work_target_ok(p, w):
+            p.work = None
+            return self._msg(p, "目标没有了，动作停下了")
+        if self.time - w["start"] < w["dur"]:
+            return
+        p.work = None
+        try:
+            if w["kind"] == "animal":
+                a = next(a for a in self.animals if a.id == w["target"])
+                self._hit_animal(p, a)
+            elif w["kind"] == "fish":
+                self._fish(p)
+            else:
+                r = next(r for r in self.res if r.id == w["target"])
+                if w["kind"] == "tree":
+                    self._chop(p, r)
+                else:
+                    self._gather(p, r)
+        except GameError as e:
+            self._msg(p, str(e))
 
     def _nearest_resource(self, p: Player, kinds: Tuple[str, ...], reach: float) -> Optional[Resource]:
         best, best_d = None, reach
@@ -791,6 +843,8 @@ class Game:
         alive = [p for p in self.players.values() if not p.dead]
         for p in alive:
             self._move(p)
+            if p.work is not None:
+                self._tick_work(p)
             self._update_stats(p)
         self._priest_blessing(alive)
         self._respawn_animals()
@@ -857,6 +911,7 @@ class Game:
         if p.health <= 0:
             p.health = 0.0
             p.dead = True
+            p.work = None
             p.move_x = p.move_z = 0.0
             self._msg(p, "你倒下了……点「重新开始」再来一次")
 
@@ -874,7 +929,8 @@ class Game:
         for a in self.animals:
             name, _, kinds, speed, flee, _ = C.ANIMALS[a.kind]
             near = None
-            if flee and outdoor:
+            hunted = any(p.work and p.work.get("target") == a.id for p in self.players.values())
+            if flee and outdoor and not hunted:
                 near = min(outdoor, key=lambda q: math.hypot(q.x - a.x, q.z - a.z))
                 if math.hypot(near.x - a.x, near.z - a.z) > FLEE_RANGE:
                     near = None
@@ -1008,6 +1064,11 @@ class Game:
                            for a in self.animals if near(a.x, a.z)]
         data["buildings"] = [self._building_row(b) for b in self.buildings.values()
                              if near(b.x + size_of(b.kind) / 2, b.z + size_of(b.kind) / 2)]
+        if p.work is not None:
+            w = p.work
+            data["me"]["work"] = {"label": C.WORK_LABEL[w["kind"]],
+                                  "progress": round(min(1.0, (self.time - w["start"]) / w["dur"]), 3),
+                                  "x": round(w["x"], 2), "z": round(w["z"], 2)}
         if with_resources:
             data["res"] = [[r.id, r.kind, r.x, r.z, r.hp] for r in self.res
                            if r.present and near(r.x + 0.5, r.z + 0.5)]

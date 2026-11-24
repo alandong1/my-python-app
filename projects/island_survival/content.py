@@ -170,3 +170,14 @@ WILD_SEED_CHANCE = 0.2            # 采草本植物时掉种子的几率
 
 # 工具等级：砍树时每下额外多得的木材
 AXE_BONUS = {"stone_axe": 1, "iron_axe": 2}
+
+# 动作要花的时间（秒）：按下互动后，进度条走完才算成功
+WORK_TIME = {"tree": 3.0, "rock": 2.0, "bush": 1.2, "herb": 1.2, "reed": 1.2,
+             "shell": 0.8, "mushroom": 0.8, "animal": 0.8, "fish": 2.5}
+# 进度条上显示的字
+WORK_LABEL = {"tree": "砍树", "rock": "采石", "bush": "采集", "herb": "采集", "reed": "采集",
+              "shell": "采集", "mushroom": "采集", "animal": "攻击", "fish": "钓鱼"}
+# 工具让动作变快：倍率越小越快（只取最好的一个工具）
+TREE_TOOL_SPEED = {"stone_axe": 0.7, "iron_axe": 0.5}
+ROCK_TOOL_SPEED = {"stone_pick": 0.7, "iron_pick": 0.5}
+SPEAR_SPEED = 0.6
