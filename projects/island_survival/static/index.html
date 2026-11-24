@@ -61,16 +61,29 @@
     <div id="log" class="card"></div>
     <div id="toast" hidden></div>
 
+    <div id="houseBar" class="card" hidden>🏠 在屋里 · 按 Q 出屋 · 按 E 拿回附近的家具</div>
+
     <div id="actions">
       <button data-action="interact" title="E">互动 E</button>
-      <button data-action="build_fire" title="B">生火 B</button>
+      <button data-action="craft" title="T">合成 T</button>
+      <button data-action="build" title="B">建造 B</button>
       <button data-action="cook" title="C">做饭 C</button>
-      <button data-action="craft" title="X" class="doctor-only">制药 X</button>
+      <button data-action="upgrade" title="U">升级 U</button>
+      <button data-action="farm" title="G">种田 G</button>
+      <button data-action="fuel" title="F">加柴 F</button>
+      <button data-action="exit" title="Q" class="house-only">出屋 Q</button>
       <button data-action="heal" title="H" class="doctor-only">治疗 H</button>
     </div>
 
+    <div id="menu" hidden>
+      <div class="panel menu-panel">
+        <div class="menu-head"><h2 id="menuTitle"></h2><button id="menuClose">关闭</button></div>
+        <ul id="menuList"></ul>
+      </div>
+    </div>
+
     <div id="joy"><div id="knob"></div></div>
-    <div id="keys" class="small">WASD 移动 · 拖动鼠标转视角 · E 互动</div>
+    <div id="keys" class="small">WASD 移动 · 拖动转视角 · E 互动 · T 合成 · B 建造 · C 做饭 · G 种田 · F 加柴 · U 升级</div>
 
     <div id="dead" hidden>
       <div class="panel">

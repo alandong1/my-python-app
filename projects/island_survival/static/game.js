@@ -6,15 +6,17 @@ const DEEP = 0, SHALLOW = 1, SAND = 2, GRASS = 3, FOREST = 4;
 const TERRAIN_H = [-0.8, -0.3, 0.05, 0.25, 0.3];                       // 深海 浅海 沙滩 草地 森林
 const TERRAIN_C = ['#1d4a72', '#3f93bd', '#e3cf93', '#6aa347', '#3a7535'];
 const ROLE_COLOR = { chef: 0xe07b39, doctor: 0xf2f2f2, priest: 0x7a5cc4 };
+const CROP_COLOR = { carrot: '#ff8c2b', potato: '#a77a3f', corn: '#f2c230' };
 const HORIZON = '#cfe6f2';
 // 远端玩家和动物按「过去 100 毫秒」的画面显示：服务器每 0.1 秒发一次，网络有快有慢，
 // 延迟 100 毫秒后就有两个快照可以匀速插值，画面不会一顿一顿。（和 strike 的做法相同）
 const INTERP_MS = 100;
 
 let ws = null, role = null, myId = null, info = null;
-let scene, camera, renderer, sun, hemi, water, waterBase = null, me = null;
+let scene, roomScene, camera, renderer, sun, water, waterBase = null, me = null;
 let yaw = Math.PI, dragging = false, lastX = 0;
-const players = new Map(), animals = new Map(), fires = new Map(), trees = new Map();
+const players = new Map(), animals = new Map(), buildings = new Map(), trees = new Map();
+let roomGroup = null, roomKey = '', lastHouse = undefined;
 const keys = new Set();
 let joy = { x: 0, y: 0 };
 let lastInvKey = '', toastTimer = 0, lastFrame = 0;
@@ -45,6 +47,15 @@ function send(obj) {
 function sendMove() {
   const v = moveVector();
   send({ type: 'move', dx: v.dx, dz: v.dz });
+}
+
+// 「我面朝哪边」：就是镜头看的方向。建造、种田、放家具都用它决定放在哪里
+function facing() {
+  return { fx: -Math.sin(yaw), fz: -Math.cos(yaw) };
+}
+
+function act(action, extra = {}) {
+  send({ type: 'action', action, ...facing(), ...extra });
 }
 
 function onMessage(msg) {
@@ -107,9 +118,8 @@ function initScene() {
   camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
   scene.add(makeSky());
 
-  // 天光（从四面八方来的柔和光）+ 太阳（会投影的主光）
-  hemi = new THREE.HemisphereLight('#cfe6ff', '#4a5a3a', 1.0);
-  scene.add(hemi);
+  // 天光 + 太阳（会投影的主光）
+  scene.add(new THREE.HemisphereLight('#cfe6ff', '#4a5a3a', 1.0));
   sun = new THREE.DirectionalLight('#ffe6bd', 2.2);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -117,6 +127,11 @@ function initScene() {
   sun.shadow.bias = -0.0008;
   sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
+
+  // 屋里的场景：没有太阳，靠天光和油灯照亮
+  roomScene = new THREE.Scene();
+  roomScene.background = new THREE.Color('#2b2620');
+  roomScene.add(new THREE.HemisphereLight('#fff3e0', '#4a3a2a', 1.4));
 
   resize();
   window.addEventListener('resize', resize);
@@ -145,6 +160,15 @@ function initScene() {
   shared.berryMat = new THREE.MeshStandardMaterial({ color: '#c0392b', roughness: 0.4 });
   shared.herb = new THREE.ConeGeometry(0.1, 0.5, 5);
   shared.herbMat = new THREE.MeshStandardMaterial({ color: '#9ccc65', roughness: 0.8 });
+  shared.reed = new THREE.CylinderGeometry(0.02, 0.03, 1.2, 5);
+  shared.reedMat = new THREE.MeshStandardMaterial({ color: '#b5c96b', roughness: 0.9 });
+  shared.rock = new THREE.DodecahedronGeometry(0.32, 0);
+  shared.rockMat = new THREE.MeshStandardMaterial({ color: '#8f8a80', roughness: 0.95, flatShading: true });
+  shared.shell = new THREE.SphereGeometry(0.12, 8, 5);
+  shared.shellMat = new THREE.MeshStandardMaterial({ color: '#f2e6d0', roughness: 0.4 });
+  shared.capMat = new THREE.MeshStandardMaterial({ color: '#d9432f', roughness: 0.6 });
+  shared.stem = new THREE.CylinderGeometry(0.04, 0.05, 0.2, 6);
+  shared.stemMat = new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.8 });
   shared.body = new THREE.CylinderGeometry(0.25, 0.25, 0.9, 12);
   shared.head = new THREE.SphereGeometry(0.22, 12, 10);
   shared.skin = new THREE.MeshStandardMaterial({ color: '#f1c9a5', roughness: 0.7 });
@@ -158,8 +182,17 @@ function initScene() {
   shared.ringMat = new THREE.MeshBasicMaterial({ color: '#ffe066', side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
   shared.tuft = new THREE.ConeGeometry(0.07, 0.28, 4);
   shared.tuftMat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
-  shared.rock = new THREE.DodecahedronGeometry(0.22, 0);
-  shared.rockMat = new THREE.MeshStandardMaterial({ color: '#9a9488', roughness: 0.95, flatShading: true });
+  shared.box = new THREE.BoxGeometry(1, 1, 1);
+  shared.wood = new THREE.MeshStandardMaterial({ color: '#8a5d36', roughness: 0.9 });
+  shared.woodLight = new THREE.MeshStandardMaterial({ color: '#b08a5a', roughness: 0.9 });
+  shared.stone = new THREE.MeshStandardMaterial({ color: '#8c877d', roughness: 0.95, flatShading: true });
+  shared.soil = new THREE.MeshStandardMaterial({ color: '#5a3d26', roughness: 1 });
+  shared.leafGreen = new THREE.MeshStandardMaterial({ color: '#4f9a3a', roughness: 0.8 });
+  shared.roofRed = new THREE.MeshStandardMaterial({ color: '#a3442f', roughness: 0.8 });
+  shared.roofBlue = new THREE.MeshStandardMaterial({ color: '#37608f', roughness: 0.8 });
+  shared.glow = new THREE.MeshBasicMaterial({ color: '#ffb347' });
+  shared.furnMat = new THREE.MeshStandardMaterial({ color: '#5b5750', roughness: 0.9 });
+  shared.cloth = new THREE.MeshStandardMaterial({ color: '#8b3a3a', roughness: 1 });
 }
 
 // 天空：从地平线的雾色渐变到头顶的蓝
@@ -202,7 +235,7 @@ function terrainHeight(x, z) {
   return h00 * (1 - fx) * (1 - fz) + h10 * fx * (1 - fz) + h01 * (1 - fx) * fz + h11 * fx * fz;
 }
 
-// 确定性的「随机」：同一个格子每次都得到同一个数，草和石头的位置每次刷新都一样
+// 确定性的「随机」：同一个格子每次都得到同一个数，草的位置每次刷新都一样
 function hash(x, z, s) {
   const v = Math.sin(x * 127.1 + z * 311.7 + s * 74.7) * 43758.5453;
   return v - Math.floor(v);
@@ -268,18 +301,16 @@ function grainTexture() {
   return tex;
 }
 
-// 地面装饰：草丛、沙滩上的石头（成千上万个用「实例」一次画完，不会拖慢画面）
+// 地面装饰：草丛（成千上万个用「实例」一次画完，不会拖慢画面）。石头、树木都是服务器的资源点，不在这里画。
 function buildDecor() {
   const W = info.w, H = info.h;
-  const tufts = [], rocks = [];
+  const tufts = [];
   for (let j = 0; j < H; j++) {
     for (let i = 0; i < W; i++) {
       const t = info.terrain.charCodeAt(j * W + i) - 48;
       const r = hash(i, j, 1);
       if ((t === GRASS && r < 0.22) || (t === FOREST && r < 0.06)) {
         tufts.push([i + 0.15 + 0.7 * hash(i, j, 2), j + 0.15 + 0.7 * hash(i, j, 3), hash(i, j, 4)]);
-      } else if (t === SAND && r < 0.025) {
-        rocks.push([i + 0.2 + 0.6 * hash(i, j, 5), j + 0.2 + 0.6 * hash(i, j, 6), hash(i, j, 7)]);
       }
     }
   }
@@ -297,21 +328,9 @@ function buildDecor() {
     tuftMesh.setColorAt(k, color);
   });
   scene.add(tuftMesh);
-
-  const rockMesh = new THREE.InstancedMesh(shared.rock, shared.rockMat, rocks.length);
-  rockMesh.castShadow = true;
-  rocks.forEach(([x, z, v], k) => {
-    const s = 0.6 + 0.9 * v;
-    dummy.position.set(x, terrainHeight(x, z) + 0.05, z);
-    dummy.rotation.set(v * 3, v * 5, v * 2);
-    dummy.scale.set(s, s * 0.7, s);
-    dummy.updateMatrix();
-    rockMesh.setMatrixAt(k, dummy.matrix);
-  });
-  scene.add(rockMesh);
 }
 
-// ------------------------------------------------------------ 模型
+// ------------------------------------------------------------ 模型：自然资源
 
 function cast(g) {
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
@@ -328,8 +347,7 @@ function makeTree(id) {
   const high = new THREE.Mesh(shared.cone2, mat);
   high.position.y = 2.8;
   g.add(trunk, low, high);
-  const s = 0.8 + ((id * 37) % 40) / 100;                  // 每棵树大小不一样
-  g.scale.setScalar(s);
+  g.scale.setScalar(0.8 + ((id * 37) % 40) / 100);      // 每棵树大小不一样
   return cast(g);
 }
 
@@ -356,6 +374,60 @@ function makeHerb() {
   }
   return cast(g);
 }
+
+function makeReed(id) {
+  const g = new THREE.Group();
+  for (let k = 0; k < 5; k++) {
+    const r = new THREE.Mesh(shared.reed, shared.reedMat);
+    const a = hash(id, k, 11) * 0.5 - 0.25;
+    r.position.set(Math.cos(k * 1.3) * 0.12, 0.6, Math.sin(k * 1.3) * 0.12);
+    r.rotation.z = a;
+    g.add(r);
+  }
+  return g;
+}
+
+function makeRock(id) {
+  const g = new THREE.Group();
+  const r = new THREE.Mesh(shared.rock, shared.rockMat);
+  r.position.y = 0.2;
+  r.rotation.set(id * 0.7, id * 1.3, 0);
+  r.scale.set(1.1, 0.8, 1);
+  g.add(r);
+  return cast(g);
+}
+
+function makeShell() {
+  const g = new THREE.Group();
+  const s = new THREE.Mesh(shared.shell, shared.shellMat);
+  s.scale.set(1, 0.4, 1.2);
+  s.position.y = 0.05;
+  g.add(s);
+  return g;
+}
+
+function makeMushroom() {
+  const g = new THREE.Group();
+  const stem = new THREE.Mesh(shared.stem, shared.stemMat);
+  stem.position.y = 0.1;
+  const cap = new THREE.Mesh(shared.rabbit, shared.capMat);
+  cap.scale.set(0.45, 0.25, 0.45);
+  cap.position.y = 0.22;
+  g.add(stem, cap);
+  return cast(g);
+}
+
+function makeResource(kind, id) {
+  if (kind === 'tree') return makeTree(id);
+  if (kind === 'bush') return makeBush();
+  if (kind === 'herb') return makeHerb();
+  if (kind === 'reed') return makeReed(id);
+  if (kind === 'rock') return makeRock(id);
+  if (kind === 'shell') return makeShell();
+  return makeMushroom();
+}
+
+// ------------------------------------------------------------ 模型：动物和玩家
 
 function makeAnimal(kind) {
   const g = new THREE.Group();
@@ -412,6 +484,80 @@ function nameTag(text) {
   return sprite;
 }
 
+// ------------------------------------------------------------ 模型：建筑和农田
+
+function box(w, h, d, mat, x, y, z) {
+  const m = new THREE.Mesh(shared.box, mat);
+  m.scale.set(w, h, d);
+  m.position.set(x, y, z);
+  return m;
+}
+
+function makeBuilding(kind, level, state) {
+  const g = new THREE.Group();
+  if (kind === 'workbench') {
+    g.add(box(1.0, 0.1, 0.7, shared.woodLight, 0, 0.8, 0));          // 台面
+    for (const [x, z] of [[-0.42, -0.27], [0.42, -0.27], [-0.42, 0.27], [0.42, 0.27]]) {
+      g.add(box(0.1, 0.8, 0.1, shared.wood, x, 0.4, z));           // 四条腿
+    }
+    g.add(box(0.3, 0.12, 0.2, shared.stone, -0.2, 0.9, 0.05));    // 工具：石头
+    if (level >= 2) g.add(box(0.8, 0.08, 0.2, shared.woodLight, 0, 0.3, -0.25));   // 2 级：下层搁板
+    if (level >= 3) g.add(box(0.6, 0.12, 0.6, shared.stone, 0.25, 1.0, 0));       // 3 级：砧台
+  } else if (kind === 'campfire') {
+    const lit = state === 'lit';
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      const s = new THREE.Mesh(shared.rock, shared.stone);
+      s.scale.setScalar(0.5);
+      s.position.set(Math.cos(a) * 0.4, 0.08, Math.sin(a) * 0.4);
+      g.add(s);
+    }
+    for (let k = 0; k < 3; k++) {                                       // 柴
+      const log = box(0.08, 0.08, 0.6, shared.wood, 0, 0.1, 0);
+      log.rotation.y = k * 1.05;
+      g.add(log);
+    }
+    if (lit) {
+      const flame = new THREE.Mesh(shared.flame, shared.flameMat);
+      flame.position.y = 0.45;
+      flame.userData.flame = true;
+      g.add(flame);
+    }
+  } else if (kind === 'furnace') {
+    g.add(box(0.9, 1.1, 0.9, shared.furnMat, 0, 0.55, 0));
+    g.add(box(0.4, 0.3, 0.05, shared.glow, 0, 0.45, 0.47));            // 炉口
+    if (level >= 2) g.add(box(0.2, 0.9, 0.2, shared.furnMat, 0.3, 1.35, -0.2));   // 2 级：烟囱
+  } else if (kind === 'house') {
+    const wallMat = level === 1 ? shared.wood : level === 2 ? shared.stone : shared.woodLight;
+    const roofMat = level === 3 ? shared.roofBlue : shared.roofRed;
+    g.add(box(2.9, 1.6, 2.9, wallMat, 0, 0.8, 0));                      // 墙
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.4, 1.2, 4), roofMat);
+    roof.rotation.y = Math.PI / 4;
+    roof.position.y = 2.2;
+    g.add(roof);
+    g.add(box(0.7, 1.0, 0.1, shared.wood, 0, 0.5, 1.5));                 // 门（朝向镜头这一侧）
+    g.add(box(0.5, 0.4, 0.1, shared.glow, -0.9, 1.0, 1.5));              // 窗
+    g.add(box(0.5, 0.4, 0.1, shared.glow, 0.9, 1.0, 1.5));
+  } else if (kind === 'plot') {
+    g.add(box(0.95, 0.12, 0.95, shared.soil, 0, 0.02, 0));
+    if (state && state !== 'empty') {
+      const [crop, stage] = state.split(':');
+      const s = [0.25, 0.5, 0.8][Number(stage)] || 0.25;
+      const leaf = new THREE.Mesh(shared.tuft, shared.leafGreen);
+      leaf.scale.setScalar(s * 2.2);
+      leaf.position.y = 0.1 + s * 0.4;
+      g.add(leaf);
+      if (Number(stage) === 2) {                                         // 成熟：露出果实
+        const fruit = new THREE.Mesh(shared.berry, new THREE.MeshStandardMaterial({ color: CROP_COLOR[crop] || '#ff8c2b' }));
+        fruit.scale.setScalar(2.5);
+        fruit.position.set(0.15, 0.2, 0.1);
+        g.add(fruit);
+      }
+    }
+  }
+  return cast(g);
+}
+
 // ------------------------------------------------------------ 快照插值
 
 // 记下服务器给的位置和收到的时间（用浏览器的时钟，不用服务器时间）
@@ -445,13 +591,20 @@ function applyState(s) {
   if (!scene) return;
   const m = s.me;
   me = m;
+  const house = m.house;                        // null 表示在室外；数字是房子的编号
+  if (house !== lastHouse) {                    // 进屋或出屋：之前的位置不能拿来插值
+    for (const mesh of players.values()) mesh.userData.samples = [];
+    lastHouse = house;
+  }
   setBars(m);
-  setInventory(m.inv);
+  setInventory(m.inv, house !== null);
   setLog(m.events);
   $('meName').textContent = m.name;
   $('dead').hidden = !m.dead;
+  $('houseBar').hidden = house === null;
+  $('actions').classList.toggle('inside', house !== null);
 
-  // 所有玩家（包括自己）
+  // 所有玩家：只显示和自己在同一个地方（室外，或同一间屋子）的
   const seen = new Set();
   for (const p of s.players) {
     const [id, , , x, z] = p;
@@ -460,7 +613,6 @@ function applyState(s) {
     if (!mesh) {
       mesh = makePlayer(p);
       mesh.userData = { samples: [] };
-      mesh.position.set(x, terrainHeight(x, z), z);
       scene.add(mesh);
       players.set(id, mesh);
     }
@@ -471,9 +623,35 @@ function applyState(s) {
   $('survivors').textContent = `岛上幸存者：${s.players.length} 人 · ` +
     s.players.map((p) => p[1] + '（' + (info.roles[p[2]] || '') + '）').join('、');
 
-  // 动物
+  if (house !== null) {
+    showRoom(s.room);
+    // 屋里只有室内的玩家：把他们挪到房间里，别的屋子的玩家藏起来
+    for (const [id, mesh] of players) {
+      mesh.visible = s.players.some((p) => p[0] === id);
+      if (mesh.visible) roomScene.add(mesh);
+    }
+    for (const mesh of animals.values()) scene.remove(mesh);
+    animals.clear();
+    setBuildingsVisible(false);
+    return;
+  }
+
+  // 室外
+  if (roomGroup) { roomScene.remove(roomGroup); roomGroup = null; roomKey = ''; }
+  for (const mesh of players.values()) { mesh.visible = true; scene.add(mesh); }
+  setBuildingsVisible(true);
+  syncAnimals(s.animals);
+  syncResources(s);
+  syncBuildings(s.buildings || []);
+}
+
+function setBuildingsVisible(v) {
+  for (const b of buildings.values()) b.visible = v;
+}
+
+function syncAnimals(list) {
   const aseen = new Set();
-  for (const [id, kind, x, z] of s.animals) {
+  for (const [id, kind, x, z] of list) {
     aseen.add(id);
     let mesh = animals.get(id);
     if (!mesh) {
@@ -486,37 +664,109 @@ function applyState(s) {
     pushSample(mesh, x, z);
   }
   removeMissing(animals, aseen);
+}
 
-  // 火堆
-  const fseen = new Set();
-  for (const [id, x, z] of s.fires) {
-    fseen.add(id);
-    if (!fires.has(id)) {
-      const g = new THREE.Group();
-      const flame = new THREE.Mesh(shared.flame, shared.flameMat);
-      flame.position.y = 0.3;
-      g.add(flame);
-      g.position.set(x, terrainHeight(x, z), z);
-      scene.add(g);
-      fires.set(id, g);
+// 资源（树、石头、灌木丛……）每秒才更新一次
+function syncResources(s) {
+  if (!s.res) return;
+  const rseen = new Set();
+  for (const [id, kind, x, z] of s.res) {
+    rseen.add(id);
+    if (!trees.has(id)) {
+      const mesh = makeResource(kind, id);
+      mesh.position.set(x + 0.5, terrainHeight(x + 0.5, z + 0.5), z + 0.5);
+      scene.add(mesh);
+      trees.set(id, mesh);
     }
   }
-  removeMissing(fires, fseen);
+  removeMissing(trees, rseen);
+}
 
-  // 资源（树、灌木丛、草本植物）：每秒才更新一次
-  if (s.res) {
-    const rseen = new Set();
-    for (const [id, kind, x, z] of s.res) {
-      rseen.add(id);
-      if (!trees.has(id)) {
-        const mesh = kind === 'tree' ? makeTree(id) : kind === 'bush' ? makeBush() : makeHerb();
-        mesh.position.set(x + 0.5, terrainHeight(x + 0.5, z + 0.5), z + 0.5);
-        scene.add(mesh);
-        trees.set(id, mesh);
-      }
+// 建筑和农田：外观（等级、火堆是否点着、农田上的作物）变了，就重新做一个
+function syncBuildings(list) {
+  const seen = new Set();
+  for (const [id, kind, cx, cz, level, state] of list) {
+    seen.add(id);
+    const key = `${kind}|${level}|${state}`;
+    let entry = buildings.get(id);
+    if (!entry || entry.key !== key) {
+      if (entry) scene.remove(entry.group);
+      const group = makeBuilding(kind, level, state);
+      group.position.set(cx, terrainHeight(cx, cz), cz);
+      scene.add(group);
+      entry = { key, group, kind };
+      buildings.set(id, entry);
     }
-    removeMissing(trees, rseen);
+    entry.group.visible = true;
   }
+  for (const [id, entry] of buildings) {
+    if (!seen.has(id)) { scene.remove(entry.group); buildings.delete(id); }
+  }
+  // 火堆的火苗闪动，在 frame 里做
+}
+
+// 屋里的画面：地板、墙（前面有门）、家具、油灯的光。房间变了（大小、家具）才重新做。
+function showRoom(room) {
+  const key = room ? `${room.id}|${room.size}|${JSON.stringify(room.furniture)}` : '';
+  if (key === roomKey) return;
+  roomKey = key;
+  if (roomGroup) roomScene.remove(roomGroup);
+  roomGroup = new THREE.Group();
+  const S = room.size;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(S, S), shared.woodLight);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(S / 2, 0, S / 2);
+  floor.receiveShadow = true;
+  roomGroup.add(floor);
+  const wallH = 2.6, t = 0.3;
+  const walls = [
+    [S / 2, S, S, t],       // 后墙
+    [0, S / 2, t, S],       // 左墙
+    [S, S / 2, t, S],       // 右墙
+  ];
+  for (const [x, z, w, d] of walls) {
+    roomGroup.add(box(w, wallH, d, shared.wood, x, wallH / 2, z));
+  }
+  // 前墙（有门的一面）：门在中间，留出 1.6 格宽的口子
+  const gap = 1.6;
+  roomGroup.add(box((S - gap) / 2, wallH, t, shared.wood, (S - gap) / 4, wallH / 2, S));
+  roomGroup.add(box((S - gap) / 2, wallH, t, shared.wood, S - (S - gap) / 4, wallH / 2, S));
+  for (const [, kind, x, z] of room.furniture) {
+    const f = furnitureMesh(kind);
+    f.position.set(x, 0, z);
+    roomGroup.add(f);
+    if (kind === 'lamp') {
+      const light = new THREE.PointLight('#ffc27a', 6, 7);
+      light.position.set(x, 1.4, z);
+      roomGroup.add(light);
+    }
+  }
+  roomScene.add(roomGroup);
+}
+
+function furnitureMesh(kind) {
+  const g = new THREE.Group();
+  if (kind === 'bed') {
+    g.add(box(1.0, 0.35, 1.8, shared.wood, 0, 0.2, 0));                   // 床架
+    g.add(box(0.95, 0.15, 1.7, shared.cloth, 0, 0.42, 0));                // 被子
+    g.add(box(0.8, 0.12, 0.3, shared.woodLight, 0, 0.5, -0.7));           // 枕头
+  } else if (kind === 'table') {
+    g.add(box(1.2, 0.08, 0.8, shared.woodLight, 0, 0.8, 0));
+    for (const [x, z] of [[-0.5, -0.32], [0.5, -0.32], [-0.5, 0.32], [0.5, 0.32]]) g.add(box(0.08, 0.8, 0.08, shared.wood, x, 0.4, z));
+  } else if (kind === 'chair') {
+    g.add(box(0.6, 0.08, 0.6, shared.woodLight, 0, 0.45, 0));
+    g.add(box(0.6, 0.6, 0.08, shared.woodLight, 0, 0.75, -0.26));
+    for (const [x, z] of [[-0.24, -0.24], [0.24, -0.24], [-0.24, 0.24], [0.24, 0.24]]) g.add(box(0.07, 0.45, 0.07, shared.wood, x, 0.22, z));
+  } else if (kind === 'chest') {
+    g.add(box(0.9, 0.55, 0.6, shared.wood, 0, 0.28, 0));
+    g.add(box(0.92, 0.08, 0.62, shared.stone, 0, 0.58, 0));
+  } else if (kind === 'rug') {
+    g.add(box(1.6, 0.02, 1.1, shared.cloth, 0, 0.02, 0));
+  } else if (kind === 'lamp') {
+    g.add(box(0.12, 1.1, 0.12, shared.wood, 0, 0.55, 0));
+    g.add(box(0.3, 0.25, 0.3, shared.glow, 0, 1.2, 0));
+  }
+  return cast(g);
 }
 
 function removeMissing(map, seen) {
@@ -537,15 +787,16 @@ function setBars(m) {
 }
 
 const USABLE = {
-  coconut: '吃', berry: '吃', raw_fish: '吃', raw_meat: '吃',
-  cooked_fish: '吃', cooked_meat: '吃', medicine: '用',
+  coconut: '吃', berry: '吃', raw_fish: '吃', raw_meat: '吃', mushroom: '吃', carrot: '吃', potato: '吃',
+  corn: '吃', cooked_fish: '吃', cooked_meat: '吃', roasted_corn: '吃', jam: '吃', veg_soup: '吃',
+  fish_stew: '吃', skewer: '吃', medicine: '用',
 };
 
-// 背包：默认收起成一个小按钮，点开才显示列表
-function setInventory(inv) {
+// 背包：默认收起成一个小按钮，点开才显示列表。屋里的家具可以直接放下。
+function setInventory(inv, inside) {
   const entries = Object.entries(inv);
   $('invCount').textContent = entries.length ? `(${entries.length})` : '';
-  const key = JSON.stringify(inv);
+  const key = JSON.stringify(inv) + inside;
   if (key === lastInvKey) return;
   lastInvKey = key;
   const ul = $('inv');
@@ -564,7 +815,12 @@ function setInventory(inv) {
     if (item in USABLE) {
       const btn = document.createElement('button');
       btn.textContent = USABLE[item];
-      btn.dataset.item = item;
+      btn.dataset.use = item;
+      li.append(btn);
+    } else if (inside && info.furniture.includes(item)) {
+      const btn = document.createElement('button');
+      btn.textContent = '放';
+      btn.dataset.place = item;
       li.append(btn);
     }
     ul.append(li);
@@ -588,20 +844,98 @@ function toast(text) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 2500);
 }
 
+// ------------------------------------------------------------ 菜单（合成、建造、做饭）
+
+function costText(obj) {
+  return Object.entries(obj).map(([k, n]) => `${info.items[k] || k}×${n}`).join('、');
+}
+
+function canAfford(obj) {
+  return Object.entries(obj).every(([k, n]) => (me.inv[k] || 0) >= n);
+}
+
+function openMenu(title, rows, emptyText) {
+  $('menuTitle').textContent = title;
+  const ul = $('menuList');
+  ul.replaceChildren();
+  if (!rows.length) {
+    const li = document.createElement('li');
+    li.textContent = emptyText || '（没有可以做的东西）';
+    ul.append(li);
+  }
+  for (const row of rows) {
+    const li = document.createElement('li');
+    if (!row.ok) li.classList.add('dim');
+    const text = document.createElement('div');
+    text.className = 'menu-text';
+    const name = document.createElement('b');
+    name.textContent = row.label;
+    const sub = document.createElement('small');
+    sub.textContent = row.sub;
+    text.append(name, sub);
+    const btn = document.createElement('button');
+    btn.textContent = row.button || '做';
+    btn.addEventListener('click', () => { row.run(); closeMenu(); });
+    li.append(text, btn);
+    ul.append(li);
+  }
+  $('menu').hidden = false;
+}
+
+function closeMenu() {
+  $('menu').hidden = true;
+}
+
+function craftMenu(station) {
+  if (!me) return;
+  const recipes = Object.entries(info.recipes).filter(([, r]) =>
+    station ? r.station === station : r.station !== 'fire');
+  const rows = recipes.map(([id, r]) => {
+    const need = r.station ? `需要${info.stationNames[r.station]}${r.level ? ' ' + r.level + ' 级' : ''}` : '随手可做';
+    const who = r.role ? `（只有${info.roles[r.role]}会做）` : '';
+    return {
+      label: r.name,
+      sub: `${costText(r.in)} → ${costText(r.out)}　${need}${who}`,
+      ok: canAfford(r.in),
+      run: () => act('craft', { recipe: id }),
+    };
+  });
+  const title = station === 'fire' ? '做饭（站在火堆旁边）' : station === 'furnace' ? '冶炼（石炉）' : '合成';
+  openMenu(title, rows, station === 'fire' ? '还没有可以做的菜' : null);
+}
+
+function buildMenu() {
+  if (!me) return;
+  const rows = Object.entries(info.builds).map(([kind, b]) => ({
+    label: b.name,
+    sub: `${costText(b.cost)}　占 ${b.size}×${b.size} 格，最高 ${b.maxLevel} 级`,
+    ok: canAfford(b.cost),
+    button: '建',
+    run: () => act('build', { kind }),
+  }));
+  openMenu('建造（在你面前）', rows);
+}
+
 // ------------------------------------------------------------ 输入
 
 function setupInput() {
   window.addEventListener('keydown', (e) => {
     if (!me || e.repeat) return;
     const k = e.key.toLowerCase();
+    if (k === 'escape') { closeMenu(); return; }
     if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
       keys.add(k);
       e.preventDefault();
       sendMove();
       return;
     }
-    const map = { e: 'interact', b: 'build_fire', c: 'cook', x: 'craft', h: 'heal' };
-    if (map[k]) send({ type: 'action', action: map[k] });
+    if (!$('menu').hidden) return;                 // 菜单开着时，别的键不处理
+    const direct = { e: 'interact', h: 'heal', q: 'exit', u: 'upgrade', g: 'farm', f: 'fuel' };
+    if (direct[k]) { act(direct[k]); return; }
+    if (k === 'x') { act('craft', { recipe: 'medicine' }); return; }
+    if (k === 't') craftMenu(null);
+    if (k === 'c') craftMenu('fire');
+    if (k === 'b') buildMenu();
   });
   window.addEventListener('keyup', (e) => { keys.delete(e.key.toLowerCase()); sendMove(); });
   window.addEventListener('blur', () => { keys.clear(); sendMove(); });
@@ -611,17 +945,27 @@ function setupInput() {
     document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
   }
 
+  // 底部按钮
+  const buttons = {
+    interact: () => act('interact'), craft: () => craftMenu(null), cook: () => craftMenu('fire'),
+    build: buildMenu, upgrade: () => act('upgrade'), farm: () => act('farm'), fuel: () => act('fuel'),
+    exit: () => act('exit'), heal: () => act('heal'),
+  };
   document.querySelectorAll('#actions button').forEach((b) => {
-    b.addEventListener('click', () => send({ type: 'action', action: b.dataset.action }));
+    b.addEventListener('click', () => buttons[b.dataset.action]?.());
   });
+  $('menuClose').addEventListener('click', closeMenu);
+  $('menu').addEventListener('click', (e) => { if (e.target.id === 'menu') closeMenu(); });
+
   $('invToggle').addEventListener('click', () => {
     const open = $('inv').hidden;                       // 原来收着 → 展开
     $('inv').hidden = !open;
     $('invArrow').textContent = open ? '▾' : '▸';
   });
   $('inv').addEventListener('click', (e) => {
-    const item = e.target.dataset && e.target.dataset.item;
-    if (item) send({ type: 'action', action: 'use', item });
+    const d = e.target.dataset || {};
+    if (d.use) send({ type: 'action', action: 'use', item: d.use });
+    if (d.place) act('place', { item: d.place });
   });
   $('respawnBtn').addEventListener('click', () => send({ type: 'action', action: 'respawn' }));
 
@@ -683,13 +1027,15 @@ function frame(now) {
   const t = now / 1000;
   const dt = lastFrame ? Math.min(0.05, (now - lastFrame) / 1000) : 0.016;
   lastFrame = now;
+  const inside = me.house !== null && me.house !== undefined;
 
   // 人物和动物：按 100 毫秒前的时间线，在两个快照之间匀速移动
   const renderT = performance.now() - INTERP_MS;
+  const ground = (x, z) => (inside ? 0 : terrainHeight(x, z));
   for (const mesh of players.values()) {
     const s = sampleAt(mesh, renderT);
     if (!s) continue;
-    mesh.position.set(s.x, terrainHeight(s.x, s.z), s.z);
+    mesh.position.set(s.x, ground(s.x, s.z), s.z);
     if (Math.abs(s.vx) + Math.abs(s.vz) > 1e-4) mesh.rotation.y = Math.atan2(s.vx, s.vz);
     const target = mesh.userData.dead ? Math.PI / 2 : 0;
     mesh.rotation.z += (target - mesh.rotation.z) * Math.min(1, dt * 10);
@@ -700,27 +1046,29 @@ function frame(now) {
     mesh.position.set(s.x, terrainHeight(s.x, s.z), s.z);
     if (Math.abs(s.vx) + Math.abs(s.vz) > 1e-4) mesh.rotation.y = Math.atan2(s.vx, s.vz);
   }
-  for (const g of fires.values()) {
-    g.children[0].scale.setScalar(0.9 + 0.15 * Math.sin(t * 12 + g.position.x));
+  // 火堆的火苗闪动
+  for (const entry of buildings.values()) {
+    entry.group.children.forEach((c) => { if (c.userData.flame) c.scale.setScalar(0.9 + 0.15 * Math.sin(t * 12 + c.position.y)); });
   }
 
   // 镜头盯着自己的模型（插值后的位置），再平滑地跟过去
   const mine = players.get(myId);
   const fx = mine ? mine.position.x : me.x;
   const fz = mine ? mine.position.z : me.z;
-  focus.set(fx, terrainHeight(fx, fz) + 1.0, fz);
-  const dist = 9, height = 5;
+  focus.set(fx, ground(fx, fz) + 1.0, fz);
+  const dist = inside ? 8 : 9, height = inside ? 9 : 5;
   const want = new THREE.Vector3(focus.x + Math.sin(yaw) * dist, focus.y + height, focus.z + Math.cos(yaw) * dist);
   camera.position.lerp(want, 1 - Math.exp(-dt * 8));
   camera.lookAt(focus);
 
-  // 太阳和阴影跟着镜头走：阴影只需要覆盖身边这一块，清晰又省资源
-  sun.position.set(focus.x + 60, focus.y + 90, focus.z + 30);
-  sun.target.position.copy(focus);
-  sun.target.updateMatrixWorld();
-
-  animateWater(t);
-  renderer.render(scene, camera);
+  if (!inside) {
+    // 太阳和阴影跟着镜头走：阴影只需要覆盖身边这一块，清晰又省资源
+    sun.position.set(focus.x + 60, focus.y + 90, focus.z + 30);
+    sun.target.position.copy(focus);
+    sun.target.updateMatrixWorld();
+    animateWater(t);
+  }
+  renderer.render(inside ? roomScene : scene, camera);
 }
 
 // 水面起伏：每个顶点高度按时间变化，法线重新计算，高光会跟着波浪动
