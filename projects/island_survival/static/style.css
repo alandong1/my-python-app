@@ -115,3 +115,25 @@ button:disabled { opacity: 0.5; cursor: default; }
   #knob { left: 25px; top: 25px; width: 50px; height: 50px; }
   #keys { display: none; }
 }
+
+/* ---------- 屋里的提示条 ---------- */
+#houseBar { top: 60px; left: 50%; transform: translateX(-50%); padding: 6px 12px; font-size: 13px; white-space: nowrap; }
+
+/* ---------- 菜单（合成、建造、做饭） ---------- */
+#menu { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.35); padding: 12px; }
+.menu-panel { width: min(560px, 100%); max-height: 82vh; display: flex; flex-direction: column; padding: 14px; }
+.menu-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.menu-head h2 { font-size: 18px; margin: 0; }
+#menuList { list-style: none; margin: 0; padding: 0; overflow: auto; }
+#menuList li { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 4px; border-bottom: 1px solid var(--bar-bg); }
+#menuList li.dim { opacity: 0.6; }
+.menu-text { display: flex; flex-direction: column; min-width: 0; }
+.menu-text small { opacity: 0.8; line-height: 1.4; }
+#menuList li button { flex: none; }
+
+/* 屋里不需要的按钮隐藏；屋里和室外的按钮都在 */
+#actions button.house-only { display: none; }
+#actions.inside button.house-only { display: inline-block; }
+#actions.inside button:not(.house-only):not(.doctor-only) { display: none; }

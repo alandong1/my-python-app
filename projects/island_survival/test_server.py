@@ -42,7 +42,7 @@ def test_join_with_a_role_and_play(client):
         assert me["name"]                                       # 名字来自平台账户
 
         # 制药需要草本植物，一开始没有：服务器应该返回一条错误，而不是崩溃
-        ws.send_json({"type": "action", "action": "craft"})
+        ws.send_json({"type": "action", "action": "craft", "recipe": "medicine"})
         err = receive_until(ws, "error")
         assert "草本植物" in err["text"]
 
