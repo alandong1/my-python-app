@@ -82,8 +82,8 @@ RECIPES: Dict[str, dict] = {
     # 随手就能做
     "stick": {"name": "木棍", "in": {"wood": 1}, "out": {"stick": 2}, "station": None, "level": 0},
     "rope": {"name": "绳子", "in": {"fiber": 3}, "out": {"rope": 1}, "station": None, "level": 0},
-    "medicine": {"name": "草药", "in": {"herb": 3}, "out": {"medicine": 1}, "station": None, "level": 0,
-                 "role": "doctor"},
+    "medicine": {"name": "草药", "in": {"herb": 3}, "in_other": {"herb": 6}, "out": {"medicine": 1},
+                 "station": None, "level": 0, "role": "doctor"},
     # 工作台 1 级
     "stone_axe": {"name": "石斧", "in": {"stick": 2, "stone": 3, "rope": 1}, "out": {"stone_axe": 1},
                   "station": "workbench", "level": 1},

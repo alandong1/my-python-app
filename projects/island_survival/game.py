@@ -213,6 +213,10 @@ class Game:
         """这个格子没有树、石头、建筑挡着。"""
         return i not in self.tree_at and i not in self.rock_at and i not in self.build_at
 
+    def _resource_on(self, tx: int, tz: int) -> bool:
+        """这个格子上有没有还在的资源点（浆果丛、草本植物……）。"""
+        return any(r.present and r.x == tx and r.z == tz for r in self.res)
+
     def _random_tile(self, kinds: Tuple[int, ...], tries: int = 2000) -> Optional[Tuple[int, int]]:
         """随机找一个指定地形、没有东西挡着的格子。"""
         for _ in range(tries):
@@ -374,6 +378,8 @@ class Game:
         if animal:
             p.next_action = self.time + ACTION_COOLDOWN
             return self._hit_animal(p, animal)
+        if self._nearest_building(p, ("house",), 2.2):      # 站在门口，优先进屋
+            return self.enter(p)
         tree = self._nearest_resource(p, ("tree",), 2.5)
         if tree:
             p.next_action = self.time + ACTION_COOLDOWN
@@ -398,9 +404,12 @@ class Game:
                     best, best_d = r, d
         return best
 
-    def _nearest_building(self, p: Player, kinds: Tuple[str, ...], reach: float) -> Optional[Building]:
+    def _nearest_building(self, p: Player, kinds: Tuple[str, ...], reach: float,
+                          lit_only: bool = False) -> Optional[Building]:
         best, best_d = None, reach
         for b in self.buildings.values():
+            if lit_only and b.fuel_until <= self.time:
+                continue
             if b.kind in kinds:
                 s = size_of(b.kind)
                 d = self._dist(p, b.x + s / 2, b.z + s / 2)
@@ -443,14 +452,16 @@ class Game:
 
     def _gather(self, p: Player, r: Resource) -> None:
         if r.kind == "rock":
-            if p.inv.get("stone_pick", 0) + p.inv.get("iron_pick", 0) == 0:
-                raise GameError("需要石镐才能采石头（去工作台合成）")
-            self._add(p, "stone", 1)
-            if p.inv.get("iron_pick", 0) > 0 and self.rng.random() < 0.2:
+            # 空手也能掰下石头（1 块），有石镐 2 块；空手也有几率挖到铁矿石，有铁镐更高。
+            # 这样不会出现「要石镐 → 要工作台 → 要石头」「要铁镐 → 要铁锭 → 要铁矿石」的死循环。
+            stone = 2 if p.inv.get("stone_pick", 0) + p.inv.get("iron_pick", 0) > 0 else 1
+            self._add(p, "stone", stone)
+            ore_chance = 0.25 if p.inv.get("iron_pick", 0) > 0 else 0.08
+            if self.rng.random() < ore_chance:
                 self._add(p, "iron_ore", 1)
-                self._msg(p, "采到了石头，还有一块铁矿石")
+                self._msg(p, f"采到了 {stone} 块石头，还有一块铁矿石")
             else:
-                self._msg(p, "采到了 1 块石头")
+                self._msg(p, f"采到了 {stone} 块石头")
         elif r.kind == "reed":
             self._add(p, "fiber", 1)
             self._msg(p, "割了一把芦苇，得到纤维")
@@ -498,8 +509,8 @@ class Game:
         if station is None:
             return
         if station == "fire":
-            b = self._nearest_building(p, ("campfire",), REACH)
-            if b is None or b.fuel_until <= self.time:
+            b = self._nearest_building(p, ("campfire",), REACH, lit_only=True)
+            if b is None:
                 raise GameError("要在一个正在烧着的火堆旁边（3 格内）才能做这个")
             if b.level < level:
                 raise GameError(f"火堆要升到 {level} 级才能做这个")
@@ -515,13 +526,13 @@ class Game:
         r = C.RECIPES.get(recipe_id)
         if r is None:
             raise GameError("没有这个配方")
-        if r.get("role") and r["role"] != p.role:
-            raise GameError(f"只有{ROLES[r['role']]}会做这个")
+        # 有的配方对不同角色要的材料不一样（比如草药：医生 3 个，其他人 6 个）
+        inputs = r["in"] if not r.get("role") or r["role"] == p.role else r.get("in_other", r["in"])
         self._station_ok(p, r["station"], r["level"])
-        missing = [C.ITEMS[k] for k, n in r["in"].items() if p.inv.get(k, 0) < n]
+        missing = [C.ITEMS[k] for k, n in inputs.items() if p.inv.get(k, 0) < n]
         if missing:
             raise GameError("材料不够：还缺 " + "、".join(missing))
-        for k, n in r["in"].items():
+        for k, n in inputs.items():
             p.inv[k] -= n
         mult = 1
         if r["station"] == "furnace":
@@ -555,7 +566,7 @@ class Game:
                 raise GameError("这里不能建，地图边缘")
             if self.terrain[tz2 * W + tx2] not in LAND:
                 raise GameError("只能建在陆地上")
-            if not self._free_tile(tz2 * W + tx2):
+            if not self._free_tile(tz2 * W + tx2) or self._resource_on(tx2, tz2):
                 raise GameError("这里已经有东西了")
         if self._dist(p, tx + size / 2, tz + size / 2) > 3.5 + size:
             raise GameError("离得太远了")
@@ -633,7 +644,7 @@ class Game:
             raise GameError("没有锄头，先去工作台做一把")
         if not (0 <= tx < W and 0 <= tz < H) or self.terrain[tz * W + tx] != GRASS:
             raise GameError("只能在草地上翻土")
-        if not self._free_tile(tz * W + tx):
+        if not self._free_tile(tz * W + tx) or self._resource_on(tx, tz):
             raise GameError("这里有东西挡着，没法翻土")
         self._place_building("plot", tx, tz, owner=p.account_id)
         self._msg(p, "翻好了一块地，可以播种了")
@@ -952,8 +963,9 @@ class Game:
             "viewRadius": VIEW_RADIUS,
             "animalNames": {k: v[0] for k, v in C.ANIMALS.items()},
             "resourceNames": {k: v[0] for k, v in C.RESOURCES.items()},
-            "recipes": {k: {"name": v["name"], "in": v["in"], "out": v["out"], "station": v["station"],
-                            "level": v["level"], "role": v.get("role")} for k, v in C.RECIPES.items()},
+            "recipes": {k: {"name": v["name"], "in": v["in"], "in_other": v.get("in_other"), "out": v["out"],
+                            "station": v["station"], "level": v["level"], "role": v.get("role")}
+                        for k, v in C.RECIPES.items()},
             "stationNames": C.STATION_NAMES,
             "builds": {k: {"name": v["name"], "cost": v["cost"], "size": v["size"],
                            "maxLevel": v["max_level"]} for k, v in C.BUILDS.items()},
