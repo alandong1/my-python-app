@@ -37,9 +37,9 @@ SEEDS = ("carrot_seed", "potato_seed", "corn_seed")
 FOOD: Dict[str, Tuple[float, float, float, float]] = {
     "coconut": (12, 2, 0, 0.0),
     "berry": (10, 0, 0, 0.0),
-    "mushroom": (8, 0, 0, 0.1),
-    "raw_fish": (15, 0, 0, 0.25),
-    "raw_meat": (20, 0, 0, 0.25),
+    "mushroom": (8, 0, 0, 0.05),
+    "raw_fish": (15, 0, 0, 0.15),
+    "raw_meat": (20, 0, 0, 0.15),
     "carrot": (10, 0, 0, 0.0),
     "potato": (8, 0, 0, 0.0),
     "corn": (8, 0, 0, 0.0),
@@ -165,8 +165,8 @@ CROPS: Dict[str, dict] = {
     "potato": {"name": "土豆", "seed": "potato_seed", "grow": 150, "yield": {"potato": (2, 3)}},
     "corn": {"name": "玉米", "seed": "corn_seed", "grow": 200, "yield": {"corn": (2, 2)}},
 }
-SEED_CHANCE = 0.5                  # 收获时掉一颗种子的几率
-WILD_SEED_CHANCE = 0.08            # 采草本植物时掉种子的几率
+SEED_CHANCE = 0.7                  # 收获时掉一颗种子的几率
+WILD_SEED_CHANCE = 0.2            # 采草本植物时掉种子的几率
 
 # 工具等级：砍树时每下额外多得的木材
 AXE_BONUS = {"stone_axe": 1, "iron_axe": 2}
