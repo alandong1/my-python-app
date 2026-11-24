@@ -90,7 +90,6 @@ function startGame(state) {
   $('pick').hidden = true;
   $('game').hidden = false;
   $('roleName').textContent = info.roles[role] || role;
-  $('actions').classList.toggle('doctor', role === 'doctor');
   // 掉线重连时会再收到一次 welcome：场景、输入和循环只初始化一次
   if (!scene) {
     initScene();
@@ -591,6 +590,7 @@ function applyState(s) {
   if (!scene) return;
   const m = s.me;
   me = m;
+  updateActions(s);
   const house = m.house;                        // null 表示在室外；数字是房子的编号
   if (house !== lastHouse) {                    // 进屋或出屋：之前的位置不能拿来插值
     for (const mesh of players.values()) mesh.userData.samples = [];
@@ -602,7 +602,6 @@ function applyState(s) {
   $('meName').textContent = m.name;
   $('dead').hidden = !m.dead;
   $('houseBar').hidden = house === null;
-  $('actions').classList.toggle('inside', house !== null);
 
   // 所有玩家：只显示和自己在同一个地方（室外，或同一间屋子）的
   const seen = new Set();
@@ -643,6 +642,63 @@ function applyState(s) {
   syncAnimals(s.animals);
   syncResources(s);
   syncBuildings(s.buildings || []);
+}
+
+// 底部按钮：只显示附近能做的事，避免屏幕上堆满按钮。
+// 判断顺序和服务器的「互动」一致：动物 → 门口 → 树 → 其他资源 → 房子 → 钓鱼。
+let lastRes = [], lastBuildings = [];
+function updateActions(s) {
+  if (s.res) lastRes = s.res;
+  const inside = me.house !== null && me.house !== undefined;
+  lastBuildings = inside ? [] : (s.buildings || []);
+  const near = (x, z, r) => (x - me.x) ** 2 + (z - me.z) ** 2 <= r * r;
+  const show = {};
+  let label = null;
+  if (inside) {
+    show.exit = true;
+    if (s.room && s.room.furniture.some((f) => near(f[2], f[3], 1.6))) label = '拿回家具';
+  } else {
+    if (s.animals.some((a) => near(a[2], a[3], 2))) label = '攻击';
+    else if (lastBuildings.some((b) => b[1] === 'house' && near(b[2], b[3], 2.2))) label = '进屋';
+    else if (lastRes.some((r) => r[1] === 'tree' && near(r[2] + 0.5, r[3] + 0.5, 2.5))) label = '砍树';
+    else if (lastRes.some((r) => r[1] !== 'tree' && near(r[2] + 0.5, r[3] + 0.5, 2))) label = '采集';
+    else if (lastBuildings.some((b) => b[1] === 'house' && near(b[2], b[3], 3))) label = '进屋';
+    else if (nearShallowWater()) label = '钓鱼';
+    for (const b of lastBuildings) {
+      if (!near(b[2], b[3], 3.5)) continue;
+      if (b[1] === 'campfire') { show.cook = true; show.fuel = true; }
+      if (['workbench', 'campfire', 'furnace', 'house'].includes(b[1])) show.upgrade = true;
+    }
+    if (lastBuildings.some((b) => b[1] === 'plot' && near(b[2], b[3], 1.6)) || (me.inv.hoe || 0) > 0) {
+      show.farm = true;
+    }
+    if (role === 'doctor' && (me.inv.medicine || 0) > 0 &&
+        s.players.some((p) => p[0] !== myId && !p[5] && near(p[3], p[4], 3))) {
+      show.heal = true;
+    }
+  }
+  if (label) show.interact = true;
+  for (const b of document.querySelectorAll('#actions button')) {
+    const a = b.dataset.action;
+    if (a === 'craft' || a === 'build') { b.hidden = inside; continue; }   // 常驻，但屋里不能用
+    b.hidden = !show[a];
+  }
+  const ib = $('interactBtn');
+  ib.hidden = !label;
+  if (label) ib.textContent = `${label} E`;
+}
+
+// 身边一格之内有没有浅海（钓鱼要站在海边）
+function nearShallowWater() {
+  const tx = Math.floor(me.x), tz = Math.floor(me.z);
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = tx + dx, z = tz + dz;
+      if (x < 0 || z < 0 || x >= info.w || z >= info.h) continue;
+      if (info.terrain.charCodeAt(z * info.w + x) - 48 === SHALLOW) return true;
+    }
+  }
+  return false;
 }
 
 function setBuildingsVisible(v) {
