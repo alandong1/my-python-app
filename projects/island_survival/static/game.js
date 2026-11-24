@@ -647,35 +647,47 @@ function applyState(s) {
 // 底部按钮：只显示附近能做的事，避免屏幕上堆满按钮。
 // 判断顺序和服务器的「互动」一致：动物 → 门口 → 树 → 其他资源 → 房子 → 钓鱼。
 let lastRes = [], lastBuildings = [];
-let interactAnchor = null;   // 互动目标的三维位置（每个快照更新）
+let interactAnchor = null;      // 互动目标的三维位置（每个快照更新）
+let currentStation = null;      // 附近的设施：点了它就打开它的菜单
+let roomLevel = 1;
+const STATION_LABEL = { workbench: '合成', campfire: '烹饪', furnace: '冶炼' };
+const STATION_NAME = { workbench: '工作台', campfire: '火堆', furnace: '石炉' };
+
+// 底部按钮和互动按钮：只显示附近能做的事。
+// 互动的优先级和服务器一致：动物 → 门口 → 树 → 其他资源 → 房子 → 设施 → 钓鱼。
 function updateActions(s) {
   if (s.res) lastRes = s.res;
   const inside = me.house !== null && me.house !== undefined;
   lastBuildings = inside ? [] : (s.buildings || []);
+  if (inside && s.room) roomLevel = s.room.level;
   const near = (x, z, r) => (x - me.x) ** 2 + (z - me.z) ** 2 <= r * r;
   const show = {};
-  let label = null, anchor = null;
-  if (inside) {
+  let label = null, anchor = null, station = null;
+  if (me.work) {
+    // 正在做事：按钮变成进度条，贴在目标旁边
+    label = me.work.label;
+    anchor = [me.work.x, me.work.z];
+  } else if (inside) {
     show.exit = true;
-    if (s.room && s.room.furniture.some((f) => near(f[2], f[3], 1.6))) label = '拿回家具';
+    if (s.room && s.room.furniture.some((f) => near(f[2], f[3], 1.6))) {
+      label = '拿回家具';
+      anchor = [me.x, me.z];
+    }
   } else {
     const animal = s.animals.find((a) => near(a[2], a[3], 2));
     const door = lastBuildings.find((b) => b[1] === 'house' && near(b[2], b[3], 2.2));
     const tree = lastRes.find((r) => r[1] === 'tree' && near(r[2] + 0.5, r[3] + 0.5, 2.5));
     const plant = lastRes.find((r) => r[1] !== 'tree' && near(r[2] + 0.5, r[3] + 0.5, 2));
     const house = lastBuildings.find((b) => b[1] === 'house' && near(b[2], b[3], 3));
-    // 按钮贴在目标旁边：动物、门、树、资源、房子、海边（海边就贴在自己身上）
+    const sta = lastBuildings.find((b) => STATION_LABEL[b[1]] && near(b[2], b[3], 3.5));
+    // 按钮贴在目标旁边：动物、门、树、资源、房子、设施、海边（海边就贴在自己身上）
     if (animal) { label = '攻击'; anchor = [animal[2], animal[3]]; }
     else if (door) { label = '进屋'; anchor = [door[2], door[3]]; }
     else if (tree) { label = '砍树'; anchor = [tree[2] + 0.5, tree[3] + 0.5]; }
     else if (plant) { label = '采集'; anchor = [plant[2] + 0.5, plant[3] + 0.5]; }
     else if (house) { label = '进屋'; anchor = [house[2], house[3]]; }
+    else if (sta) { label = STATION_LABEL[sta[1]]; anchor = [sta[2], sta[3]]; station = sta[1]; }
     else if (nearShallowWater()) { label = '钓鱼'; anchor = [me.x, me.z]; }
-    for (const b of lastBuildings) {
-      if (!near(b[2], b[3], 3.5)) continue;
-      if (b[1] === 'campfire') { show.cook = true; show.fuel = true; }
-      if (['workbench', 'campfire', 'furnace', 'house'].includes(b[1])) show.upgrade = true;
-    }
     if (lastBuildings.some((b) => b[1] === 'plot' && near(b[2], b[3], 1.6)) || (me.inv.hoe || 0) > 0) {
       show.farm = true;
     }
@@ -685,19 +697,27 @@ function updateActions(s) {
     }
   }
   if (label) show.interact = true;
+  currentStation = station && !me.work ? station : null;
   for (const b of document.querySelectorAll('#actions button')) {
     const a = b.dataset.action;
-    if (a === 'craft' || a === 'build') { b.hidden = inside; continue; }   // 常驻，但屋里不能用
-    b.hidden = !show[a];
+    b.hidden = a === 'build' ? inside : !show[a];      // 建造常驻（屋里除外）
   }
   const ib = $('interactBtn');
   ib.hidden = !label;
-  if (label) ib.textContent = `${label} E`;
-  // 室内：拿家具时贴在家具旁边（用玩家自己的位置，家具在屋里的坐标系里）
-  if (inside && label) anchor = [me.x, me.z];
-  interactAnchor = anchor ? new THREE.Vector3(anchor[0], 0, anchor[1]) : null;
-  if (interactAnchor && !inside) interactAnchor.y = terrainHeight(anchor[0], anchor[1]) + 1.6;
-  if (interactAnchor && inside) interactAnchor.y = 1.6;
+  if (label) {
+    const pct = me.work ? Math.round(me.work.progress * 100) : 0;
+    ib.textContent = me.work ? `${label}… ${pct}%` : `${label} E`;
+    // 进度条：按钮的背景从左到右填满
+    ib.style.background = me.work
+      ? `linear-gradient(90deg, #2f7d5b ${pct}%, rgba(40, 60, 50, 0.92) ${pct}%)` : '';
+  }
+  // 互动按钮要摆在哪里（三维位置，每帧换算成屏幕坐标）
+  if (anchor) {
+    interactAnchor = new THREE.Vector3(anchor[0], terrainHeight(anchor[0], anchor[1]) + 1.6, anchor[1]);
+    if (inside) interactAnchor.y = 1.6;
+  } else {
+    interactAnchor = null;
+  }
 }
 
 // 把互动按钮放到目标的屏幕位置上（目标在身后、看不见时就藏起来）
@@ -922,7 +942,7 @@ function toast(text) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 2500);
 }
 
-// ------------------------------------------------------------ 菜单（合成、建造、做饭）
+// ------------------------------------------------------------ 菜单：建造 / 合成 / 升级，设施的菜单
 
 function costText(obj) {
   return Object.entries(obj).map(([k, n]) => `${info.items[k] || k}×${n}`).join('、');
@@ -932,16 +952,28 @@ function canAfford(obj) {
   return Object.entries(obj).every(([k, n]) => (me.inv[k] || 0) >= n);
 }
 
-function openMenu(title, rows, emptyText) {
+// 打开一个带标签页的面板。tabs = [{name, rows, empty}]；rows = [{label, sub, ok, button, run}]
+function openPanel(title, tabs, active) {
+  const cur = tabs.find((t) => t.name === active) || tabs[0];
   $('menuTitle').textContent = title;
+  const bar = $('menuTabs');
+  bar.replaceChildren();
+  for (const t of tabs) {
+    const b = document.createElement('button');
+    b.textContent = t.name;
+    b.className = 'tab' + (t === cur ? ' on' : '');
+    b.addEventListener('click', () => openPanel(title, tabs, t.name));
+    bar.append(b);
+  }
+  bar.hidden = tabs.length < 2;
   const ul = $('menuList');
   ul.replaceChildren();
-  if (!rows.length) {
+  if (!cur.rows.length) {
     const li = document.createElement('li');
-    li.textContent = emptyText || '（没有可以做的东西）';
+    li.textContent = cur.empty || '（这里没有可以做的东西）';
     ul.append(li);
   }
-  for (const row of rows) {
+  for (const row of cur.rows) {
     const li = document.createElement('li');
     if (!row.ok) li.classList.add('dim');
     const text = document.createElement('div');
@@ -951,10 +983,12 @@ function openMenu(title, rows, emptyText) {
     const sub = document.createElement('small');
     sub.textContent = row.sub;
     text.append(name, sub);
+    li.append(text);
     const btn = document.createElement('button');
     btn.textContent = row.button || '做';
+    btn.disabled = !row.run;
     btn.addEventListener('click', () => { row.run(); closeMenu(); });
-    li.append(text, btn);
+    li.append(btn);
     ul.append(li);
   }
   $('menu').hidden = false;
@@ -964,35 +998,97 @@ function closeMenu() {
   $('menu').hidden = true;
 }
 
-function craftMenu(station) {
-  if (!me) return;
-  const recipes = Object.entries(info.recipes).filter(([, r]) =>
-    station ? r.station === station : r.station !== 'fire');
-  const rows = recipes.map(([id, r]) => {
-    const need = r.station ? `需要${info.stationNames[r.station]}${r.level ? ' ' + r.level + ' 级' : ''}` : '随手可做';
-    const mine = r.role && me.role !== r.role && r.in_other ? r.in_other : r.in;
-    const who = r.role ? `（${info.roles[r.role]}只要${costText(r.in)}，其他人要${costText(r.in_other || r.in)}）` : '';
-    return {
-      label: r.name,
-      sub: `${costText(mine)} → ${costText(r.out)}　${need}${who}`,
-      ok: canAfford(mine),
-      run: () => act('craft', { recipe: id }),
-    };
-  });
-  const title = station === 'fire' ? '做饭（站在火堆旁边）' : station === 'furnace' ? '冶炼（石炉）' : '合成';
-  openMenu(title, rows, station === 'fire' ? '还没有可以做的菜' : null);
+function recipeRow(id, r) {
+  const need = r.station ? `需要${info.stationNames[r.station]}${r.level ? ' ' + r.level + ' 级' : ''}` : '随手可做';
+  const useOther = r.role && me.role !== r.role && r.in_other;
+  const mine = useOther ? r.in_other : r.in;
+  let who = '';
+  if (r.role) {
+    who = r.in_other
+      ? `（${info.roles[r.role]}只要${costText(r.in)}，其他人要${costText(r.in_other)}）`
+      : `（只有${info.roles[r.role]}会做）`;
+  }
+  return {
+    label: r.name,
+    sub: `${costText(mine)} → ${costText(r.out)}　${need}${who}`,
+    ok: canAfford(mine),
+    run: () => act('craft', { recipe: id }),
+  };
 }
 
-function buildMenu() {
+// 附近能升级的建筑（室内就是这间房子）
+function upgradeRows() {
+  const inside = me.house !== null && me.house !== undefined;
+  const list = inside
+    ? [{ kind: 'house', level: roomLevel }]
+    : lastBuildings.filter((b) => b[1] !== 'plot' && (b[2] - me.x) ** 2 + (b[3] - me.z) ** 2 <= 3.5 * 3.5)
+      .map((b) => ({ kind: b[1], level: b[4] }));
+  return list.map(({ kind, level }) => {
+    const spec = info.builds[kind];
+    const name = STATION_NAME[kind] || spec.name;
+    if (level >= spec.maxLevel) {
+      return { label: `${name}（${level} 级）`, sub: '已经是最高级了', ok: false, run: null };
+    }
+    const cost = info.upgrades[kind][String(level + 1)];
+    return {
+      label: `${name}：${level} 级 → ${level + 1} 级`,
+      sub: costText(cost),
+      ok: canAfford(cost),
+      button: '升',
+      run: () => act('upgrade'),
+    };
+  });
+}
+
+// 建造面板：建造 / 合成 / 升级 三个标签页
+function openBuildPanel(tab) {
   if (!me) return;
-  const rows = Object.entries(info.builds).map(([kind, b]) => ({
+  const inside = me.house !== null && me.house !== undefined;
+  const builds = inside ? [] : Object.entries(info.builds).map(([kind, b]) => ({
     label: b.name,
     sub: `${costText(b.cost)}　占 ${b.size}×${b.size} 格，最高 ${b.maxLevel} 级`,
     ok: canAfford(b.cost),
     button: '建',
     run: () => act('build', { kind }),
   }));
-  openMenu('建造（在你面前）', rows);
+  const recipes = Object.entries(info.recipes)
+    .filter(([, r]) => !r.station || r.station === 'workbench')
+    .map(([id, r]) => recipeRow(id, r));
+  const tabs = [
+    { name: '建造', rows: builds, empty: '在屋里不能建造，先按 Q 出屋' },
+    { name: '合成', rows: recipes },
+    { name: '升级', rows: upgradeRows(), empty: '附近没有可以升级的东西（靠近工作台、火堆、石炉或房子）' },
+  ];
+  openPanel('建造与合成', tabs, tab);
+}
+
+// 设施的菜单：点工作台、火堆、石炉打开
+function openStation(kind) {
+  if (!me || me.work) return;
+  if (kind === 'campfire') {
+    const fire = Object.entries(info.recipes).filter(([, r]) => r.station === 'fire').map(([id, r]) => recipeRow(id, r));
+    const wood = me.inv.wood || 0;
+    openPanel('火堆', [
+      { name: '烹饪', rows: fire, empty: '还没有可以做的菜' },
+      { name: '加柴', rows: [{
+        label: '加一根木材当柴', sub: `背包里有木材 ${wood} 根；每根能烧一会儿，火一直烧着才能做饭`,
+        ok: wood > 0, button: '加', run: () => act('fuel'),
+      }] },
+    ], '烹饪');
+  } else if (kind === 'workbench') {
+    const rows = Object.entries(info.recipes).filter(([, r]) => r.station === 'workbench').map(([id, r]) => recipeRow(id, r));
+    openPanel('工作台', [{ name: '合成', rows, empty: '没有可以做的东西' }], '合成');
+  } else {
+    const rows = Object.entries(info.recipes).filter(([, r]) => r.station === 'furnace').map(([id, r]) => recipeRow(id, r));
+    openPanel('石炉', [{ name: '冶炼', rows, empty: '没有可以冶炼的东西' }], '冶炼');
+  }
+}
+
+// 点互动按钮（或按 E）：附近是设施就打开它的菜单，否则做互动的事
+function interactClick() {
+  if (!me) return;
+  if (currentStation) return openStation(currentStation);
+  act('interact');
 }
 
 // ------------------------------------------------------------ 输入
@@ -1009,12 +1105,16 @@ function setupInput() {
       return;
     }
     if (!$('menu').hidden) return;                 // 菜单开着时，别的键不处理
-    const direct = { e: 'interact', h: 'heal', q: 'exit', u: 'upgrade', g: 'farm', f: 'fuel' };
+    if (k === 'e') return interactClick();
+    if (k === 'b') return openBuildPanel('建造');
+    if (k === 't') return openBuildPanel('合成');
+    if (k === 'c') {
+      if (currentStation === 'campfire') return openStation('campfire');
+      return toast('要站在火堆旁边才能烹饪');
+    }
+    const direct = { h: 'heal', q: 'exit', u: 'upgrade', g: 'farm', f: 'fuel' };
     if (direct[k]) { act(direct[k]); return; }
-    if (k === 'x') { act('craft', { recipe: 'medicine' }); return; }
-    if (k === 't') craftMenu(null);
-    if (k === 'c') craftMenu('fire');
-    if (k === 'b') buildMenu();
+    if (k === 'x') act('craft', { recipe: 'medicine' });
   });
   window.addEventListener('keyup', (e) => { keys.delete(e.key.toLowerCase()); sendMove(); });
   window.addEventListener('blur', () => { keys.clear(); sendMove(); });
@@ -1024,16 +1124,14 @@ function setupInput() {
     document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
   }
 
-  // 底部按钮
+  // 底部按钮（建造常驻；种田、治疗、出屋只在需要时显示）和互动按钮
   const buttons = {
-    interact: () => act('interact'), craft: () => craftMenu(null), cook: () => craftMenu('fire'),
-    build: buildMenu, upgrade: () => act('upgrade'), farm: () => act('farm'), fuel: () => act('fuel'),
-    exit: () => act('exit'), heal: () => act('heal'),
+    build: () => openBuildPanel('建造'), farm: () => act('farm'), heal: () => act('heal'), exit: () => act('exit'),
   };
   document.querySelectorAll('#actions button').forEach((b) => {
     b.addEventListener('click', () => buttons[b.dataset.action]?.());
   });
-  $('interactBtn').addEventListener('click', () => act('interact'));
+  $('interactBtn').addEventListener('click', interactClick);
   $('menuClose').addEventListener('click', closeMenu);
   $('menu').addEventListener('click', (e) => { if (e.target.id === 'menu') closeMenu(); });
 
