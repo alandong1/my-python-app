@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>记账本 · Dev Lab</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <a href="/" class="home" title="返回 Dev Lab">🏠</a>
+    <span class="title">记账本</span>
+    <span class="spacer"></span>
+    <input type="month" id="month" aria-label="选择月份">
+  </header>
+
+  <main>
+    <section class="totals" aria-label="本月合计">
+      <div><span>支出</span><b id="sumExpense">0.00</b></div>
+      <div><span>收入</span><b id="sumIncome">0.00</b></div>
+      <div><span>结余</span><b id="sumBalance">0.00</b></div>
+    </section>
+
+    <section class="card">
+      <h2>记一笔</h2>
+      <form id="entryForm" autocomplete="off">
+        <div class="seg" role="group" aria-label="类型">
+          <button type="button" data-kind="expense" class="on">支出</button>
+          <button type="button" data-kind="income">收入</button>
+        </div>
+
+        <label>金额（元）
+          <input id="amount" type="text" inputmode="decimal" placeholder="0.00" required>
+        </label>
+
+        <div class="row">
+          <label>分类
+            <select id="category"></select>
+          </label>
+          <label>日期
+            <input id="occurredOn" type="date" required>
+          </label>
+        </div>
+
+        <label>备注
+          <input id="note" maxlength="100" placeholder="可不填">
+        </label>
+
+        <button type="submit" class="primary">保存</button>
+        <p id="formMsg" class="msg" role="status"></p>
+      </form>
+
+      <button id="shotBtn" type="button" class="ghost">📷 截图识别金额</button>
+      <p class="hint">
+        在页面空白处<b>快速双击</b>，或点上面的按钮，就会截图并识别其中的数字。
+        电脑浏览器会让你选择要共享的屏幕或窗口；手机浏览器会打开相册，选刚才截的图即可。
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>本月账目</h2>
+      <ul id="list" class="list"></ul>
+      <p id="empty" class="hint" hidden>这个月还没有账目。</p>
+    </section>
+  </main>
+
+  <!-- 截图识别结果 -->
+  <div id="shotPanel" class="panel" hidden>
+    <div class="panel-box" role="dialog" aria-modal="true" aria-labelledby="shotTitle">
+      <h2 id="shotTitle">识别结果</h2>
+      <img id="shotImg" alt="截图预览">
+      <p id="ocrStatus" class="hint">正在识别…</p>
+      <div id="candidates" class="chips"></div>
+      <details>
+        <summary>识别出的全部文字</summary>
+        <pre id="ocrText"></pre>
+      </details>
+      <button id="shotClose" type="button" class="ghost">关闭</button>
+    </div>
+  </div>
+
+  <!-- 手机上用：打开相册选截图 -->
+  <input id="filePick" type="file" accept="image/*" hidden>
+
+  <script src="static/app.js"></script>
+</body>
+</html>
