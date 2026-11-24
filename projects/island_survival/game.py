@@ -385,19 +385,30 @@ class Game:
             return self.enter(p)
         tree = self._nearest_resource(p, ("tree",), 2.5)
         if tree:
-            return self._start_work(p, "tree", tree.id, tree.x + 0.5, tree.z + 0.5)
+            return self._start_batch(p, tree, 2.5)
         plant = self._nearest_resource(p, tuple(k for k in C.RESOURCES if k != "tree"), 2.0)
         if plant:
-            return self._start_work(p, plant.kind, plant.id, plant.x + 0.5, plant.z + 0.5)
+            return self._start_batch(p, plant, 2.0)
         if self._nearest_building(p, ("house",), 3.0):
             return self.enter(p)
         if self._near_water(p.x, p.z):
             return self._start_work(p, "fish", None, p.x, p.z)
         raise GameError("附近没有可以互动的东西。树、石头、动物、房子，或者浅海边")
 
+    def _start_batch(self, p: Player, first: Resource, reach: float) -> None:
+        """一次采集附近同类的几个资源（最多 BATCH_MAX 个），走完一起结算。"""
+        same = sorted((r for r in self.res if r.present and r.kind == first.kind
+                       and self._dist(p, r.x + 0.5, r.z + 0.5) <= reach),
+                      key=lambda r: self._dist(p, r.x + 0.5, r.z + 0.5))
+        batch = same[:C.BATCH_MAX]
+        n = len(batch)
+        dur = self._work_time(p, first.kind) * (1 + C.BATCH_TIME_STEP * (n - 1))
+        p.work = {"kind": first.kind, "targets": [r.id for r in batch], "target": batch[0].id,
+                  "x": first.x + 0.5, "z": first.z + 0.5, "start": self.time, "dur": dur, "n": n}
+
     def _start_work(self, p: Player, kind: str, target: Optional[int], x: float, z: float) -> None:
-        p.work = {"kind": kind, "target": target, "x": x, "z": z,
-                  "start": self.time, "dur": self._work_time(p, kind)}
+        p.work = {"kind": kind, "targets": [target] if target is not None else [], "target": target,
+                  "x": x, "z": z, "start": self.time, "dur": self._work_time(p, kind), "n": 1}
 
     def _work_time(self, p: Player, kind: str) -> float:
         base = C.WORK_TIME[kind]
@@ -411,41 +422,45 @@ class Game:
             return base * C.SPEAR_SPEED
         return base
 
-    def _work_target_ok(self, p: Player, w: dict) -> bool:
+    def _valid_targets(self, p: Player, w: dict) -> list:
+        """还在、还够得着的目标（批量采集时，有的可能已经没了）。"""
         if w["kind"] == "fish":
-            return self._near_water(p.x, p.z)
+            return [None] if self._near_water(p.x, p.z) else []
         if w["kind"] == "animal":
-            a = next((a for a in self.animals if a.id == w["target"]), None)
-            return a is not None and self._dist(p, a.x, a.z) <= 3.0
-        r = next((r for r in self.res if r.id == w["target"]), None)
-        return r is not None and r.present and self._dist(p, r.x + 0.5, r.z + 0.5) <= 3.0
+            return [a for a in self.animals if a.id in w["targets"] and self._dist(p, a.x, a.z) <= 3.0]
+        out = []
+        for tid in w["targets"]:
+            r = next((r for r in self.res if r.id == tid), None)
+            if r is not None and r.present and self._dist(p, r.x + 0.5, r.z + 0.5) <= 3.0:
+                out.append(r)
+        return out
 
     def _tick_work(self, p: Player) -> None:
-        """每个 tick 推进一次正在做的事：走开、目标没了就取消；进度条走完就完成。"""
+        """每个 tick 推进一次正在做的事：走开、目标都没了就取消；进度条走完就一起结算。"""
         w = p.work
         if abs(p.move_x) > 0.05 or abs(p.move_z) > 0.05:
             p.work = None
             return self._msg(p, "你走开了，动作停下了")
-        if not self._work_target_ok(p, w):
+        targets = self._valid_targets(p, w)
+        if not targets:
             p.work = None
             return self._msg(p, "目标没有了，动作停下了")
         if self.time - w["start"] < w["dur"]:
             return
         p.work = None
-        try:
-            if w["kind"] == "animal":
-                a = next(a for a in self.animals if a.id == w["target"])
-                self._hit_animal(p, a)
-            elif w["kind"] == "fish":
-                self._fish(p)
-            else:
-                r = next(r for r in self.res if r.id == w["target"])
-                if w["kind"] == "tree":
-                    self._chop(p, r)
+        for t in targets:
+            try:
+                if w["kind"] == "animal":
+                    self._hit_animal(p, t)
+                elif w["kind"] == "fish":
+                    self._fish(p)
+                elif w["kind"] == "tree":
+                    self._chop(p, t)
                 else:
-                    self._gather(p, r)
-        except GameError as e:
-            self._msg(p, str(e))
+                    self._gather(p, t)
+            except GameError as e:
+                self._msg(p, str(e))
+                break
 
     def _nearest_resource(self, p: Player, kinds: Tuple[str, ...], reach: float) -> Optional[Resource]:
         best, best_d = None, reach
@@ -929,7 +944,7 @@ class Game:
         for a in self.animals:
             name, _, kinds, speed, flee, _ = C.ANIMALS[a.kind]
             near = None
-            hunted = any(p.work and p.work.get("target") == a.id for p in self.players.values())
+            hunted = any(p.work and a.id in p.work.get("targets", []) for p in self.players.values())
             if flee and outdoor and not hunted:
                 near = min(outdoor, key=lambda q: math.hypot(q.x - a.x, q.z - a.z))
                 if math.hypot(near.x - a.x, near.z - a.z) > FLEE_RANGE:
@@ -1051,7 +1066,8 @@ class Game:
                 "inv": {k: v for k, v in p.inv.items() if v > 0},
                 "events": msgs, "house": p.house,
             },
-            "players": [[q.id, q.name, q.role, round(q.x, 2), round(q.z, 2), q.dead, q.sick]
+            "players": [[q.id, q.name, q.role, round(q.x, 2), round(q.z, 2), q.dead, q.sick,
+                         q.work["kind"] if q.work else ""]
                         for q in self.players.values() if q.house == p.house],
         }
         if p.house is not None:
@@ -1066,7 +1082,7 @@ class Game:
                              if near(b.x + size_of(b.kind) / 2, b.z + size_of(b.kind) / 2)]
         if p.work is not None:
             w = p.work
-            data["me"]["work"] = {"label": C.WORK_LABEL[w["kind"]],
+            data["me"]["work"] = {"label": C.WORK_LABEL[w["kind"]], "kind": w["kind"], "n": w["n"],
                                   "progress": round(min(1.0, (self.time - w["start"]) / w["dur"]), 3),
                                   "x": round(w["x"], 2), "z": round(w["z"], 2)}
         if with_resources:

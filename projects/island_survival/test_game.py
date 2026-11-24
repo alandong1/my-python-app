@@ -797,3 +797,71 @@ def test_working_on_a_target_stops_it_fleeing(spot):
     for _ in range(5):                            # 半秒：不被打的兔子会跑得远远的
         g.tick()
     assert math.hypot(rabbit.x - p.x, rabbit.z - p.z) < 1.8
+
+
+# ------------------------------------------------------------ 批量采集：一次采附近同类的好几个
+
+def _add_res(g, kind, x, z):
+    r = Resource(id=len(g.res), kind=kind, x=x, z=z, hp=C.RESOURCES[kind][1])
+    g.res.append(r)
+    if kind == "tree":
+        g.tree_at[z * W + x] = r.id
+    if kind == "rock":
+        g.rock_at[z * W + x] = r.id
+    return r
+
+
+def test_one_press_chops_three_trees_at_once(spot):
+    g, p, x, z = spot
+    trees = [_add_res(g, "tree", x + 1, z), _add_res(g, "tree", x + 1, z - 1), _add_res(g, "tree", x, z - 1)]
+    g.act(p, "interact", {})
+    assert p.work["n"] == 3
+    assert p.work["dur"] == pytest.approx(C.WORK_TIME["tree"] * (1 + C.BATCH_TIME_STEP * 2))
+    for _ in range(400):
+        if p.work is None:
+            break
+        g.tick()
+    assert [t.hp for t in trees] == [2, 2, 2]     # 三棵都被砍了一下
+    assert p.inv["wood"] == 3
+
+
+def test_batch_takes_longer_than_one_but_less_than_three_separately(spot):
+    g, p, x, z = spot
+    _add_res(g, "tree", x + 1, z)
+    _add_res(g, "tree", x + 1, z - 1)
+    _add_res(g, "tree", x, z - 1)
+    g.act(p, "interact", {})
+    batch = p.work["dur"]
+    assert C.WORK_TIME["tree"] < batch < 3 * C.WORK_TIME["tree"]
+
+
+def test_three_rocks_at_once_with_stone_pick(spot):
+    g, p, x, z = spot
+    p.inv = {"stone_pick": 1}
+    for dx, dz in [(1, 0), (1, -1), (0, -1)]:
+        _add_res(g, "rock", x + dx, z + dz)
+    interact_and_wait(g, p)
+    assert p.inv["stone"] == 6                    # 石镐：每块 2 个，三块一起
+
+
+def test_batch_only_takes_the_same_kind(spot):
+    g, p, x, z = spot
+    _add_res(g, "tree", x + 1, z)
+    _add_res(g, "bush", x, z - 1)
+    g.act(p, "interact", {})
+    assert p.work["kind"] == "tree" and p.work["n"] == 1
+
+
+def test_batch_skips_targets_that_are_gone(spot):
+    g, p, x, z = spot
+    a = _add_res(g, "tree", x + 1, z)
+    b = _add_res(g, "tree", x + 1, z - 1)
+    g.act(p, "interact", {})
+    a.present = False                             # 中途有一棵没了（不让它在测试中长回来）
+    a.regrow_at = 1e12
+    g.tree_at.pop(z * W + x + 1, None)
+    for _ in range(400):
+        if p.work is None:
+            break
+        g.tick()
+    assert b.hp == 2 and p.inv["wood"] == 1       # 只结算还在的那一棵

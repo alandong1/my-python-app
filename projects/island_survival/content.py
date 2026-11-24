@@ -181,3 +181,6 @@ WORK_LABEL = {"tree": "砍树", "rock": "采石", "bush": "采集", "herb": "采
 TREE_TOOL_SPEED = {"stone_axe": 0.7, "iron_axe": 0.5}
 ROCK_TOOL_SPEED = {"stone_pick": 0.7, "iron_pick": 0.5}
 SPEAR_SPEED = 0.6
+# 一次互动最多同时采几个同类的资源（树、石头、灌木丛……）。时间按个数加长，但比逐个采快。
+BATCH_MAX = 3
+BATCH_TIME_STEP = 0.6     # 每多一个，时间多出 60% 的基础时间

@@ -192,6 +192,12 @@ function initScene() {
   shared.glow = new THREE.MeshBasicMaterial({ color: '#ffb347' });
   shared.furnMat = new THREE.MeshStandardMaterial({ color: '#5b5750', roughness: 0.9 });
   shared.cloth = new THREE.MeshStandardMaterial({ color: '#8b3a3a', roughness: 1 });
+  shared.arm = new THREE.BoxGeometry(0.14, 0.6, 0.14);
+  shared.handle = new THREE.BoxGeometry(0.07, 0.6, 0.07);
+  shared.axeHead = new THREE.BoxGeometry(0.22, 0.16, 0.06);
+  shared.pickHead = new THREE.BoxGeometry(0.34, 0.07, 0.07);
+  shared.spearShaft = new THREE.BoxGeometry(0.05, 1.5, 0.05);
+  shared.metal = new THREE.MeshStandardMaterial({ color: '#9aa3ab', roughness: 0.4, metalness: 0.6 });
 }
 
 // 天空：从地平线的雾色渐变到头顶的蓝
@@ -450,11 +456,29 @@ function makeAnimal(kind) {
 function makePlayer(p) {
   const [id, name, r] = p;
   const g = new THREE.Group();
+  const torso = new THREE.Group();          // 上半身：弯腰、挥手都是转它
   const body = new THREE.Mesh(shared.body, new THREE.MeshStandardMaterial({ color: ROLE_COLOR[r] || 0xffffff, roughness: 0.6 }));
   body.position.y = 0.45;
   const head = new THREE.Mesh(shared.head, shared.skin);
   head.position.y = 1.15;
-  g.add(body, head);
+  // 右手：肩膀是转轴，手里拿着工具（只显示正在用的那个）
+  const arm = new THREE.Group();
+  arm.position.set(0.32, 0.95, 0);
+  const hand = new THREE.Mesh(shared.arm, shared.skin);
+  hand.position.y = -0.3;
+  arm.add(hand);
+  const tools = {
+    axe: toolMesh([shared.axeHead, 0, -0.62, 0.1], shared.wood, shared.metal),
+    pick: toolMesh([shared.pickHead, 0, -0.62, 0.1], shared.wood, shared.metal),
+    spear: toolMesh(null, shared.wood, shared.metal),
+  };
+  tools.spear.children[0].geometry = shared.spearShaft;   // 鱼叉用长杆
+  tools.spear.children[0].position.set(0, 0, 0.1);
+  tools.spear.position.set(0, -0.35, 0.25);
+  tools.spear.rotation.x = Math.PI / 2;
+  for (const t of Object.values(tools)) { t.visible = false; arm.add(t); }
+  torso.add(body, head, arm);
+  g.add(torso);
   if (id === myId) {
     const ring = new THREE.Mesh(shared.ring, shared.ringMat);
     ring.rotation.x = -Math.PI / 2;
@@ -462,7 +486,61 @@ function makePlayer(p) {
     g.add(ring);
   }
   g.add(nameTag(name));
+  g.userData.torso = torso;
+  g.userData.arm = arm;
+  g.userData.tools = tools;
+  g.userData.phase = (id * 0.37) % 6.28;      // 每个人的动作节奏不一样
+  g.userData.swing = 0;
   return cast(g);
+}
+
+// 工具：柄 + 头（斧子、镐子）
+function toolMesh(headSpec, handleMat, headMat) {
+  const g = new THREE.Group();
+  const handle = new THREE.Mesh(shared.handle, handleMat);
+  handle.position.set(0, -0.3, 0.1);
+  g.add(handle);
+  if (headSpec) {
+    const [geo, x, y, z] = headSpec;
+    const head = new THREE.Mesh(geo, headMat);
+    head.position.set(x, y, z);
+    g.add(head);
+  }
+  return g;
+}
+
+// 动作动画：根据别人（和自己）正在做的事，挥手、弯腰、刺
+const ARM_REST = 0;
+function animatePlayer(mesh, t, dt) {
+  const d = mesh.userData;
+  if (!d.torso) return;
+  const act = d.act || '';
+  const ph = d.phase;
+  const ease = Math.min(1, dt * 12);
+  let armTarget = ARM_REST, torsoTarget = 0;
+  const tools = d.tools;
+  const show = { axe: false, pick: false, spear: false };
+  if (act === 'tree') {                       // 砍树：举起斧子，用力劈下
+    const s = (Math.sin(t * 5 + ph) + 1) / 2;
+    armTarget = -1.9 + 1.9 * s;
+    show.axe = true;
+  } else if (act === 'rock') {                // 采石：镐子大幅度地砸
+    const s = (Math.sin(t * 4 + ph) + 1) / 2;
+    armTarget = -2.2 + 2.2 * s;
+    show.pick = true;
+  } else if (act === 'bush' || act === 'herb' || act === 'reed' || act === 'shell' || act === 'mushroom') {
+    torsoTarget = 0.85;                       // 采集：弯下腰伸手去拿
+    armTarget = 0.5 + 0.15 * Math.sin(t * 3 + ph);
+  } else if (act === 'animal') {              // 攻击：往前一刺
+    armTarget = -1.3 + 0.9 * Math.max(0, Math.sin(t * 9 + ph));
+    show.spear = false;
+  } else if (act === 'fish') {                // 钓鱼：手伸向海面
+    armTarget = -1.1 + 0.06 * Math.sin(t * 2 + ph);
+  }
+  d.swing += (armTarget - d.swing) * ease;
+  d.arm.rotation.x = d.swing;
+  d.torso.rotation.x += (torsoTarget - d.torso.rotation.x) * ease;
+  for (const k of Object.keys(show)) tools[k].visible = show[k];
 }
 
 function nameTag(text) {
@@ -611,12 +689,13 @@ function applyState(s) {
     let mesh = players.get(id);
     if (!mesh) {
       mesh = makePlayer(p);
-      mesh.userData = { samples: [] };
+      mesh.userData.samples = [];
       scene.add(mesh);
       players.set(id, mesh);
     }
     pushSample(mesh, x, z);
     mesh.userData.dead = p[5];
+    mesh.userData.act = p[7] || '';
   }
   removeMissing(players, seen);
   $('survivors').textContent = `岛上幸存者：${s.players.length} 人 · ` +
@@ -706,7 +785,8 @@ function updateActions(s) {
   ib.hidden = !label;
   if (label) {
     const pct = me.work ? Math.round(me.work.progress * 100) : 0;
-    ib.textContent = me.work ? `${label}… ${pct}%` : `${label} E`;
+    const count = me.work && me.work.n > 1 ? ` ×${me.work.n}` : '';
+    ib.textContent = me.work ? `${label}${count}… ${pct}%` : `${label} E`;
     // 进度条：按钮的背景从左到右填满
     ib.style.background = me.work
       ? `linear-gradient(90deg, #2f7d5b ${pct}%, rgba(40, 60, 50, 0.92) ${pct}%)` : '';
@@ -1217,6 +1297,7 @@ function frame(now) {
     if (Math.abs(s.vx) + Math.abs(s.vz) > 1e-4) mesh.rotation.y = Math.atan2(s.vx, s.vz);
     const target = mesh.userData.dead ? Math.PI / 2 : 0;
     mesh.rotation.z += (target - mesh.rotation.z) * Math.min(1, dt * 10);
+    animatePlayer(mesh, t, dt);
   }
   for (const mesh of animals.values()) {
     const s = sampleAt(mesh, renderT);
