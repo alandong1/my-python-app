@@ -1,0 +1,154 @@
+/* 记账本样式：手机优先，颜色用变量，深色模式自动切换。 */
+:root {
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --text: #1d2330;
+  --muted: #6b7280;
+  --line: #e3e7ed;
+  --primary: #2f7d6d;
+  --primary-text: #ffffff;
+  --expense: #c2410c;
+  --income: #15803d;
+  --chip: #eef3f1;
+  --radius: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171c;
+    --card: #1e232b;
+    --text: #e6e9ee;
+    --muted: #9aa3b2;
+    --line: #2d343f;
+    --primary: #3fa38f;
+    --primary-text: #0d1512;
+    --expense: #fb923c;
+    --income: #4ade80;
+    --chip: #263029;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c;
+  --card: #1e232b;
+  --text: #e6e9ee;
+  --muted: #9aa3b2;
+  --line: #2d343f;
+  --primary: #3fa38f;
+  --primary-text: #0d1512;
+  --expense: #fb923c;
+  --income: #4ade80;
+  --chip: #263029;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  /* 关掉浏览器自带的双击缩放，否则快速双击会把页面放大，和记账的双击冲突 */
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+input, select, pre, details { -webkit-user-select: text; user-select: text; }
+
+#topbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+#topbar .home { text-decoration: none; font-size: 20px; }
+#topbar .title { font-weight: 700; }
+#topbar .spacer { flex: 1; }
+#month {
+  font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px;
+}
+
+main { max-width: 640px; margin: 0 auto; padding: 14px 16px 40px; }
+
+.totals {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-bottom: 14px;
+}
+.totals div {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 8px; text-align: center;
+}
+.totals span { display: block; color: var(--muted); font-size: 13px; }
+.totals b { display: block; margin-top: 4px; font-size: 18px; font-variant-numeric: tabular-nums; }
+#sumExpense { color: var(--expense); }
+#sumIncome { color: var(--income); }
+
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; margin-bottom: 14px;
+}
+.card h2 { margin: 0 0 12px; font-size: 17px; }
+
+form label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted); }
+form label input, form label select {
+  display: block; width: 100%; margin-top: 6px;
+  font: inherit; font-size: 17px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+}
+form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+.seg button {
+  font: inherit; padding: 9px; border-radius: 10px; cursor: pointer;
+  background: var(--bg); color: var(--muted); border: 1px solid var(--line);
+}
+.seg button.on { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+
+button {
+  font: inherit; cursor: pointer; border-radius: 10px; padding: 11px 14px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+}
+button.primary { width: 100%; background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
+button.ghost { width: 100%; margin-top: 8px; }
+.msg { min-height: 1.4em; margin: 8px 0 0; font-size: 14px; color: var(--primary); }
+.msg.error { color: var(--expense); }
+.hint { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 10px 0 0; }
+
+.list { list-style: none; margin: 0; padding: 0; }
+.list li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.list li:last-child { border-bottom: 0; }
+.list .meta { flex: 1; min-width: 0; }
+.list .meta b { display: block; font-weight: 600; }
+.list .meta small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.list .amt { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.list .amt.expense { color: var(--expense); }
+.list .amt.income { color: var(--income); }
+.list .del {
+  padding: 4px 8px; font-size: 13px; color: var(--muted); background: transparent; border: 0;
+}
+
+.panel {
+  position: fixed; inset: 0; z-index: 20;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.panel[hidden] { display: none; }
+.panel-box {
+  background: var(--card); color: var(--text); border-radius: var(--radius);
+  width: 100%; max-width: 460px; max-height: 90vh; overflow: auto; padding: 16px;
+}
+.panel-box h2 { margin: 0 0 10px; font-size: 17px; }
+#shotImg { display: block; width: 100%; max-height: 40vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.chips button { margin: 0; padding: 8px 12px; background: var(--chip); font-variant-numeric: tabular-nums; }
+details { margin-top: 10px; font-size: 13px; color: var(--muted); }
+pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: var(--bg); padding: 8px; border-radius: 8px; }
+
+/* 很窄的手机屏幕：不让两列挤在一起 */
+@media (max-width: 360px) {
+  form .row { grid-template-columns: 1fr; }
+}
