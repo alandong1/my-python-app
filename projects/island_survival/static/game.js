@@ -892,11 +892,12 @@ function craftMenu(station) {
     station ? r.station === station : r.station !== 'fire');
   const rows = recipes.map(([id, r]) => {
     const need = r.station ? `需要${info.stationNames[r.station]}${r.level ? ' ' + r.level + ' 级' : ''}` : '随手可做';
-    const who = r.role ? `（只有${info.roles[r.role]}会做）` : '';
+    const mine = r.role && me.role !== r.role && r.in_other ? r.in_other : r.in;
+    const who = r.role ? `（${info.roles[r.role]}只要${costText(r.in)}，其他人要${costText(r.in_other || r.in)}）` : '';
     return {
       label: r.name,
-      sub: `${costText(r.in)} → ${costText(r.out)}　${need}${who}`,
-      ok: canAfford(r.in),
+      sub: `${costText(mine)} → ${costText(r.out)}　${need}${who}`,
+      ok: canAfford(mine),
       run: () => act('craft', { recipe: id }),
     };
   });

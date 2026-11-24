@@ -125,17 +125,17 @@ def test_chop_tree_with_stone_axe_gives_more_wood_then_regrows(spot):
     assert tree.present is True and tree.hp == 3
 
 
-def test_rock_needs_stone_pick(spot):
+def test_rock_gives_stone_by_hand_and_more_with_stone_pick(spot):
     g, p, x, z = spot
     rock = Resource(id=g._new_id(), kind="rock", x=x + 1, z=z, hp=3)
     g.res.append(rock)
     g.rock_at[z * W + x + 1] = rock.id
-    with pytest.raises(GameError):
-        g.act(p, "interact", {})                 # 没有石镐
-    passed(g, 1)
-    p.inv = {"stone_pick": 1}
-    g.act(p, "interact", {})
+    g.act(p, "interact", {})                     # 空手：1 块石头
     assert p.inv["stone"] == 1
+    passed(g, 1)
+    p.inv["stone_pick"] = 1
+    g.act(p, "interact", {})                     # 有石镐：2 块
+    assert p.inv["stone"] == 3
 
 
 def test_gather_small_resources(spot):
@@ -583,3 +583,154 @@ def test_view_only_sends_nearby_things(g):
     p.events.append("测试消息")
     assert g.view(p, False)["me"]["events"] == ["测试消息"]
     assert g.view(p, False)["me"]["events"] == []
+
+
+# ------------------------------------------------------------ 防死循环：从空背包出发，能不能拿到一切
+
+def _spot_for_resource(g, kind):
+    """在一块清空的草地上放一个指定种类的资源点，玩家站在旁边。"""
+    x, z = open_spot(g)
+    p = g.join(20 + len(g.players), "探", "chef")
+    place(p, x + 0.5, z + 0.5)
+    r = Resource(id=g._new_id(), kind=kind, x=x + 1, z=z, hp=C.RESOURCES[kind][1])
+    g.res.append(r)
+    if kind == "rock":
+        g.rock_at[z * W + x + 1] = r.id
+    if kind == "tree":
+        g.tree_at[z * W + x + 1] = r.id
+    return p
+
+
+@pytest.mark.parametrize("kind, item", [
+    ("tree", "wood"), ("bush", "berry"), ("herb", "herb"), ("reed", "fiber"),
+    ("rock", "stone"), ("shell", "shell"), ("mushroom", "mushroom"),
+])
+def test_every_resource_can_be_gathered_with_empty_hands(g, kind, item):
+    """空手也能采到每一种资源（不需要工具），否则会出现「要工具 → 要材料 → 要工具」的死循环。"""
+    p = _spot_for_resource(g, kind)
+    assert p.inv == {}
+    g.act(p, "interact", {})
+    assert p.inv.get(item, 0) >= 1, f"空手采{C.RESOURCES[kind][0]}拿不到{C.ITEMS[item]}"
+
+
+def test_bare_hands_can_hunt_rabbit(spot):
+    g, p, x, z = spot
+    rabbit = Animal(id=g._new_id(), kind="rabbit", x=x + 1.5, z=z + 0.5, hp=2)
+    g.animals.append(rabbit)
+    g.act(p, "interact", {})
+    passed(g, 1)
+    g.act(p, "interact", {})
+    assert p.inv.get("raw_meat", 0) == 1
+
+
+def test_bare_hands_can_get_iron_ore_eventually(g):
+    """没有铁镐也有机会挖到铁矿石，否则「铁镐要铁锭，铁锭要铁矿石，铁矿石要铁镐」就是死循环。"""
+    p = g.join(30, "矿", "chef")
+    got = 0
+    for _ in range(300):
+        rock = Resource(id=g._new_id(), kind="rock", x=10, z=10, hp=3)
+        g._gather(p, rock)
+        got = p.inv.get("iron_ore", 0)
+        if got:
+            break
+    assert got >= 1
+
+
+def _reachable_from_empty():
+    """从空背包出发，按照配方和建造规则，算出能拿到哪些东西、能建哪些建筑（不管位置）。"""
+    have = {"wood", "coconut", "berry", "herb", "mushroom", "shell", "fiber", "stone", "iron_ore",
+            "raw_fish", "raw_meat"}                    # 空手能采到的（见上面的测试）
+    built = {}                                         # 建筑 → 能达到的最高等级
+    station_kind = {"workbench": "workbench", "furnace": "furnace", "fire": "campfire"}
+    changed = True
+    while changed:
+        changed = False
+
+        def add(items):
+            nonlocal changed
+            for i in items:
+                if i not in have:
+                    have.add(i)
+                    changed = True
+
+        add(C.SEEDS)                                   # 草本植物偶尔掉种子
+        for spec in C.CROPS.values():                  # 有种子和锄头，就能种出作物
+            if spec["seed"] in have and "hoe" in have:
+                add(spec["yield"].keys())
+        for kind, b in C.BUILDS.items():               # 材料齐了，就能建
+            if kind not in built and all(k in have for k, n in b["cost"].items()):
+                built[kind] = 1
+                changed = True
+        for kind, levels in C.UPGRADES.items():        # 材料齐了，就能升级
+            for lv, cost in sorted(levels.items()):
+                if built.get(kind, 0) == lv - 1 and all(k in have for k in cost):
+                    built[kind] = lv
+                    changed = True
+        for r in C.RECIPES.values():                   # 材料齐了、设施也有，就能做出来
+            need = r.get("in_other", r["in"])
+            if not all(k in have for k in need):
+                continue
+            if r["station"] and built.get(station_kind[r["station"]], 0) < r["level"]:
+                continue
+            add(r["out"].keys())
+    return have, built
+
+
+def test_every_item_and_building_is_reachable_from_nothing():
+    have, built = _reachable_from_empty()
+    missing = sorted(C.ITEMS[i] for i in C.ITEMS if i not in have)
+    assert not missing, "这些东西永远拿不到：" + "、".join(missing)
+    for kind, spec in C.BUILDS.items():
+        assert built.get(kind, 0) == spec["max_level"], f"{spec['name']}升不到最高级 {spec['max_level']}"
+
+
+def test_medicine_costs_more_for_non_doctors(spot):
+    g, p, x, z = spot
+    p.inv = {"herb": 3}
+    with pytest.raises(GameError):
+        craft(g, p, "medicine")                  # 厨师要 6 个
+    p.inv = {"herb": 6}
+    craft(g, p, "medicine")
+    assert p.inv["medicine"] == 1 and p.inv.get("herb", 0) == 0
+    doc = g.join(40, "医", "doctor")
+    place(doc, x + 0.5, z + 0.5)
+    doc.inv = {"herb": 3}
+    craft(g, doc, "medicine")                    # 医生只要 3 个
+    assert doc.inv["medicine"] == 1
+
+
+def test_entering_house_beats_chopping_nearby_tree(spot):
+    g, p, x, z = spot
+    p.inv = {"wood": 20, "stone": 6, "rope": 2}
+    build(g, p, "house", fx=0.0, fz=1.0)
+    house = next(b for b in g.buildings.values() if b.kind == "house")
+    tree = Resource(id=g._new_id(), kind="tree", x=int(house.x) + 4, z=z, hp=3)
+    g.res.append(tree)
+    g.tree_at[z * W + int(house.x) + 4] = tree.id
+    place(p, house.x + 1.5, house.z + 3.6)       # 站在门口，旁边有树
+    p.x = house.x + 3.2
+    g.act(p, "interact", {})
+    assert p.house == house.id and tree.present is True
+
+
+def test_cooking_uses_a_lit_campfire_even_if_an_unlit_one_is_closer(spot):
+    g, p, x, z = spot
+    p.inv = {"wood": 3, "stone": 1}
+    build(g, p, "campfire")                       # 近的那个，灭着
+    p.inv = {"wood": 1, "stone": 1, "raw_fish": 1}
+    place(p, x + 0.5, z + 0.5)
+    from .game import Building
+    lit = Building(id=g._new_id(), kind="campfire", x=x - 2, z=z, fuel_until=g.time + 60)
+    g.buildings[lit.id] = lit
+    g.build_at[z * W + x - 2] = lit.id
+    craft(g, p, "cook_fish")                      # 能用那个烧着的火堆做饭
+    assert p.inv["cooked_fish"] == 1
+
+
+def test_cannot_build_on_top_of_a_resource(spot):
+    g, p, x, z = spot
+    p.inv = {"wood": 6, "stone": 2}
+    bush = Resource(id=g._new_id(), kind="bush", x=x + 2, z=z, hp=2)
+    g.res.append(bush)
+    with pytest.raises(GameError):
+        build(g, p, "workbench")                  # 面前是浆果丛
