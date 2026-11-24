@@ -91,8 +91,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 #actions { position: absolute; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px;
   justify-content: flex-end; max-width: 60%; }
 #actions button { background: rgba(29, 42, 51, 0.8); padding: 8px 10px; font-size: 13px; }
-#actions button.doctor-only { display: none; }
-#actions.doctor button.doctor-only { display: inline-block; }
+
 
 #joy { position: absolute; left: 22px; bottom: 22px; width: 120px; height: 120px; border-radius: 50%;
   background: rgba(255, 255, 255, 0.25); border: 2px solid rgba(255, 255, 255, 0.5); touch-action: none; }
@@ -133,7 +132,3 @@ button:disabled { opacity: 0.5; cursor: default; }
 .menu-text small { opacity: 0.8; line-height: 1.4; }
 #menuList li button { flex: none; }
 
-/* 屋里不需要的按钮隐藏；屋里和室外的按钮都在 */
-#actions button.house-only { display: none; }
-#actions.inside button.house-only { display: inline-block; }
-#actions.inside button:not(.house-only):not(.doctor-only) { display: none; }
