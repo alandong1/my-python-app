@@ -30,7 +30,7 @@ ROLES = {"chef": "厨师", "doctor": "医生", "priest": "牧师"}
 
 ACTION_COOLDOWN = 0.4    # 互动之间至少间隔多少秒（防止连点刷资源）
 FISH_COOLDOWN = 2.0
-FISH_CHANCE = 0.4
+FISH_CHANCE = 0.6
 LOW = 30                 # 数值低于这个值会开始扣血
 SAFE = 60                # 三项都不低于这个值，健康才会慢慢恢复
 SICK_DRAIN = 0.3         # 生病时每秒额外扣的血
@@ -246,11 +246,11 @@ class Game:
                     elif roll < 0.07:
                         self._add_resource("rock", x, z)
                 elif t == SAND:
-                    if roll < 0.012:
+                    if roll < 0.02:
                         self._add_resource("rock", x, z)
                     elif roll < 0.03:
                         self._add_resource("shell", x, z)
-                    elif roll < 0.12 and self._near_water(x, z):
+                    elif roll < 0.2 and self._near_water(x, z):
                         self._add_resource("reed", x, z)
         for kind, spec in C.ANIMALS.items():
             for _ in range(spec[5]):
@@ -445,7 +445,7 @@ class Game:
         r.regrow_at = self.time + C.RESOURCES["tree"][2]
         self.tree_at.pop(r.z * W + r.x, None)
         msg = f"砍倒了一棵树，得到 {gain} 木材"
-        if self.rng.random() < 0.5:
+        if self.rng.random() < 0.6:
             p.inv["coconut"] = p.inv.get("coconut", 0) + 1
             msg += "，还掉下一个椰子"
         self._msg(p, msg)
@@ -456,7 +456,7 @@ class Game:
             # 这样不会出现「要石镐 → 要工作台 → 要石头」「要铁镐 → 要铁锭 → 要铁矿石」的死循环。
             stone = 2 if p.inv.get("stone_pick", 0) + p.inv.get("iron_pick", 0) > 0 else 1
             self._add(p, "stone", stone)
-            ore_chance = 0.25 if p.inv.get("iron_pick", 0) > 0 else 0.08
+            ore_chance = 0.4 if p.inv.get("iron_pick", 0) > 0 else 0.2
             if self.rng.random() < ore_chance:
                 self._add(p, "iron_ore", 1)
                 self._msg(p, f"采到了 {stone} 块石头，还有一块铁矿石")
@@ -904,7 +904,7 @@ class Game:
     def _respawn_animals(self) -> None:
         for kind, spec in C.ANIMALS.items():
             count = sum(1 for a in self.animals if a.kind == kind)
-            if count < spec[5] and self.rng.random() < 0.03:
+            if count < spec[5] and self.rng.random() < 0.06:
                 self._spawn_animal(kind)
 
     # ------------------------------------------------------------ 存档
