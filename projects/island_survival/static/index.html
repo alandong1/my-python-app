@@ -63,9 +63,11 @@
 
     <div id="houseBar" class="card" hidden>🏠 在屋里 · 按 Q 出屋 · 按 E 拿回附近的家具</div>
 
+    <!-- 互动按钮：不在底部，而是贴在目标旁边（由 game.js 的 placeInteract 摆放） -->
+    <button id="interactBtn" title="E" hidden>互动 E</button>
+
     <!-- 底部按钮：常驻的只有合成和建造；其他的只在附近有对应东西时才显示（见 game.js 的 updateActions） -->
     <div id="actions">
-      <button data-action="interact" id="interactBtn" title="E" hidden>互动 E</button>
       <button data-action="craft" title="T">合成 T</button>
       <button data-action="build" title="B">建造 B</button>
       <button data-action="cook" title="C" hidden>烹饪 C</button>

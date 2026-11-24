@@ -132,3 +132,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 .menu-text small { opacity: 0.8; line-height: 1.4; }
 #menuList li button { flex: none; }
 
+
+/* 互动按钮：贴在目标旁边，位置由脚本算出来 */
+#interactBtn { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -100%);
+  background: rgba(47, 125, 91, 0.95); color: #fff; font-size: 15px; font-weight: 600;
+  padding: 8px 16px; border-radius: 999px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  white-space: nowrap; z-index: 5; }

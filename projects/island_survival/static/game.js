@@ -647,23 +647,30 @@ function applyState(s) {
 // 底部按钮：只显示附近能做的事，避免屏幕上堆满按钮。
 // 判断顺序和服务器的「互动」一致：动物 → 门口 → 树 → 其他资源 → 房子 → 钓鱼。
 let lastRes = [], lastBuildings = [];
+let interactAnchor = null;   // 互动目标的三维位置（每个快照更新）
 function updateActions(s) {
   if (s.res) lastRes = s.res;
   const inside = me.house !== null && me.house !== undefined;
   lastBuildings = inside ? [] : (s.buildings || []);
   const near = (x, z, r) => (x - me.x) ** 2 + (z - me.z) ** 2 <= r * r;
   const show = {};
-  let label = null;
+  let label = null, anchor = null;
   if (inside) {
     show.exit = true;
     if (s.room && s.room.furniture.some((f) => near(f[2], f[3], 1.6))) label = '拿回家具';
   } else {
-    if (s.animals.some((a) => near(a[2], a[3], 2))) label = '攻击';
-    else if (lastBuildings.some((b) => b[1] === 'house' && near(b[2], b[3], 2.2))) label = '进屋';
-    else if (lastRes.some((r) => r[1] === 'tree' && near(r[2] + 0.5, r[3] + 0.5, 2.5))) label = '砍树';
-    else if (lastRes.some((r) => r[1] !== 'tree' && near(r[2] + 0.5, r[3] + 0.5, 2))) label = '采集';
-    else if (lastBuildings.some((b) => b[1] === 'house' && near(b[2], b[3], 3))) label = '进屋';
-    else if (nearShallowWater()) label = '钓鱼';
+    const animal = s.animals.find((a) => near(a[2], a[3], 2));
+    const door = lastBuildings.find((b) => b[1] === 'house' && near(b[2], b[3], 2.2));
+    const tree = lastRes.find((r) => r[1] === 'tree' && near(r[2] + 0.5, r[3] + 0.5, 2.5));
+    const plant = lastRes.find((r) => r[1] !== 'tree' && near(r[2] + 0.5, r[3] + 0.5, 2));
+    const house = lastBuildings.find((b) => b[1] === 'house' && near(b[2], b[3], 3));
+    // 按钮贴在目标旁边：动物、门、树、资源、房子、海边（海边就贴在自己身上）
+    if (animal) { label = '攻击'; anchor = [animal[2], animal[3]]; }
+    else if (door) { label = '进屋'; anchor = [door[2], door[3]]; }
+    else if (tree) { label = '砍树'; anchor = [tree[2] + 0.5, tree[3] + 0.5]; }
+    else if (plant) { label = '采集'; anchor = [plant[2] + 0.5, plant[3] + 0.5]; }
+    else if (house) { label = '进屋'; anchor = [house[2], house[3]]; }
+    else if (nearShallowWater()) { label = '钓鱼'; anchor = [me.x, me.z]; }
     for (const b of lastBuildings) {
       if (!near(b[2], b[3], 3.5)) continue;
       if (b[1] === 'campfire') { show.cook = true; show.fuel = true; }
@@ -686,6 +693,21 @@ function updateActions(s) {
   const ib = $('interactBtn');
   ib.hidden = !label;
   if (label) ib.textContent = `${label} E`;
+  // 室内：拿家具时贴在家具旁边（用玩家自己的位置，家具在屋里的坐标系里）
+  if (inside && label) anchor = [me.x, me.z];
+  interactAnchor = anchor ? new THREE.Vector3(anchor[0], 0, anchor[1]) : null;
+  if (interactAnchor && !inside) interactAnchor.y = terrainHeight(anchor[0], anchor[1]) + 1.6;
+  if (interactAnchor && inside) interactAnchor.y = 1.6;
+}
+
+// 把互动按钮放到目标的屏幕位置上（目标在身后、看不见时就藏起来）
+function placeInteract() {
+  const btn = $('interactBtn');
+  if (btn.hidden || !interactAnchor) return;
+  const v = interactAnchor.clone().project(camera);
+  btn.style.visibility = v.z > 1 || v.z < -1 ? 'hidden' : 'visible';
+  btn.style.left = ((v.x + 1) / 2 * window.innerWidth) + 'px';
+  btn.style.top = ((1 - v.y) / 2 * window.innerHeight) + 'px';
 }
 
 // 身边一格之内有没有浅海（钓鱼要站在海边）
@@ -1011,6 +1033,7 @@ function setupInput() {
   document.querySelectorAll('#actions button').forEach((b) => {
     b.addEventListener('click', () => buttons[b.dataset.action]?.());
   });
+  $('interactBtn').addEventListener('click', () => act('interact'));
   $('menuClose').addEventListener('click', closeMenu);
   $('menu').addEventListener('click', (e) => { if (e.target.id === 'menu') closeMenu(); });
 
@@ -1117,6 +1140,7 @@ function frame(now) {
   const want = new THREE.Vector3(focus.x + Math.sin(yaw) * dist, focus.y + height, focus.z + Math.cos(yaw) * dist);
   camera.position.lerp(want, 1 - Math.exp(-dt * 8));
   camera.lookAt(focus);
+  placeInteract();
 
   if (!inside) {
     // 太阳和阴影跟着镜头走：阴影只需要覆盖身边这一块，清晰又省资源
