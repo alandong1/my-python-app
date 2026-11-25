@@ -357,6 +357,9 @@ class Room:
             else:
                 act, kind = "discard", ai.choose_discard(r.hands[seat], len(r.melds[seat]), r.visible())
             if act == "discard":
+                allowed = r.allowed_discards(seat)          # 对方明牌时，不能打发给他的牌
+                if kind not in allowed:
+                    kind = allowed[0]
                 r.discard(seat, kind)
             elif act == "hu":
                 r.act_self(seat, "hu")

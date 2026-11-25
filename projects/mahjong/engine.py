@@ -96,6 +96,8 @@ class Round:
         if self.phase != "predraw" or seat != self.turn:
             return []
         opts = [{"action": "skip", "kind": None, "item": None}]
+        if self.opened[seat]:
+            return opts                                   # 明牌之后只能摸打
         for k, n in self.stock[seat].items():
             if n > 0 and k in ITEM_NAMES:
                 opts.append({"action": "item", "kind": None, "item": k, "name": ITEM_NAMES[k]})
@@ -111,6 +113,8 @@ class Round:
         """
         if self.phase != "predraw" or seat != self.turn:
             raise GameError("现在不能用道具")
+        if self.opened[seat] and action == "item":
+            raise GameError("明牌之后不能用道具")
         if action == "skip":
             self._draw_for(seat)
             return
@@ -202,6 +206,11 @@ class Round:
         c = self.hands[seat]
         if self._can_win(seat, None, True):
             opts.append({"action": "hu", "kind": None})
+        if self.opened[seat]:
+            return opts                                       # 明牌之后只能摸打，不能再杠
+        for k in range(R.KINDS):
+            if c[k] == 4:
+                opts.append({"action": "gang_an", "kind": k})  # 暗杠
         for m in self.melds[seat]:
             if m["type"] == "pong" and c[m["kind"]] > 0:
                 opts.append({"action": "gang_jia", "kind": m["kind"]})
@@ -219,11 +228,24 @@ class Round:
 
     # ------------------------------------------------------------ 出牌
 
+    def _dangerous(self, seat: int, kind: int) -> bool:
+        """打出 kind 会让某个已经明牌的对手和牌（点炮）。"""
+        return any(self.opened[t] and self._can_win(t, kind, False) is not None
+                   for t in range(N_PLAYERS) if t != seat)
+
+    def allowed_discards(self, seat: int) -> List[int]:
+        """seat 现在能打的牌。对方明牌时，不能故意点炮，除非手里每张牌都是炮牌。"""
+        hand_kinds = [k for k in range(R.KINDS) if self.hands[seat][k]]
+        all_dangerous = all(self._dangerous(seat, k) for k in hand_kinds)
+        return [k for k in hand_kinds if all_dangerous or not self._dangerous(seat, k)]
+
     def discard(self, seat: int, kind: int) -> None:
         if self.phase != "discard" or seat != self.turn:
             raise GameError("现在不是你出牌")
         if self.hands[seat][kind] <= 0:
             raise GameError("手里没有这张牌")
+        if kind not in self.allowed_discards(seat):
+            raise GameError("对方已经明牌，不能故意点炮")
         self.hands[seat][kind] -= 1
         self.discards[seat].append(kind)
         self.last = (seat, kind)
@@ -237,7 +259,7 @@ class Round:
             self._next_turn()
 
     def _claims_for(self, src: int, kind: int) -> Dict[int, List[str]]:
-        """别人打出 kind 后，每家能做的操作。"""
+        """别人打出 kind 后，每家能做的操作。明牌后的人只能胡，不能碰、杠。"""
         out: Dict[int, List[str]] = {}
         for t in range(N_PLAYERS):
             if t == src:
@@ -246,10 +268,11 @@ class Round:
             if self._can_win(t, kind, False):
                 acts.append("hu")
             c = self.hands[t]
-            if c[kind] >= 3:
-                acts.append("gang_ming")
-            if c[kind] >= 2:
-                acts.append("pong")
+            if not self.opened[t]:
+                if c[kind] >= 3:
+                    acts.append("gang_ming")
+                if c[kind] >= 2:
+                    acts.append("pong")
             if acts:
                 out[t] = acts
         return out
@@ -317,13 +340,16 @@ class Round:
             return
         if not any(o["action"] == action and o["kind"] == kind for o in opts):
             raise GameError("现在不能这样杠")
-        # 只有碰后加杠（4 张）。暗杠不允许：四张一样的牌要留在手里做四归一
-        self.hands[seat][kind] -= 1
-        for m in self.melds[seat]:
-            if m["type"] == "pong" and m["kind"] == kind:
-                m["type"] = "gang_jia"
-                break
-        for o in range(N_PLAYERS):           # 加杠：其余每家付 1 分
+        if action == "gang_an":
+            self.hands[seat][kind] -= 4
+            self.melds[seat].append({"type": "gang_an", "kind": kind, "from": None})
+        else:                                # gang_jia：碰升级成杠
+            self.hands[seat][kind] -= 1
+            for m in self.melds[seat]:
+                if m["type"] == "pong" and m["kind"] == kind:
+                    m["type"] = "gang_jia"
+                    break
+        for o in range(N_PLAYERS):           # 暗杠、加杠：其余每家付 1 分
             if o != seat:
                 self.gang_pay[o] -= 1
                 self.gang_pay[seat] += 1
@@ -355,9 +381,29 @@ class Round:
         self._end("win", winners, None, deltas)
 
     def _end_draw(self) -> None:
-        self._end("draw", [], None, list(self.gang_pay))
+        """流局：听牌的人能和的最大牌型，由未听牌的人付给每一个听牌的人。"""
+        deltas = list(self.gang_pay)
+        tenpai = []
+        for t in range(N_PLAYERS):
+            best = None
+            for k in range(R.KINDS):
+                info = self._can_win(t, k, False)
+                if info and (best is None or info["points"] > best["points"]):
+                    best = dict(info, win=k)
+            if best is not None:
+                tenpai.append({"seat": t, "fan": best["fan"], "points": best["points"],
+                               "items": best["items"], "win": best["win"]})
+        if 0 < len(tenpai) < N_PLAYERS:
+            tenpai_seats = {x["seat"] for x in tenpai}
+            for x in tenpai:
+                for n in range(N_PLAYERS):
+                    if n not in tenpai_seats:
+                        deltas[n] -= x["points"]
+                        deltas[x["seat"]] += x["points"]
+        self._end("draw", [], None, deltas, tenpai=tenpai)
 
-    def _end(self, kind: str, winners: List[dict], src: Optional[int], deltas: List[int]) -> None:
+    def _end(self, kind: str, winners: List[dict], src: Optional[int], deltas: List[int],
+             tenpai: Optional[List[dict]] = None) -> None:
         self.phase = "over"
         self.pending = {}
         self.responses = {}
@@ -367,6 +413,7 @@ class Round:
             "winners": winners,
             "from": src,
             "deltas": deltas,
+            "tenpai": tenpai or [],
             "revealed": [R.expand(h) for h in self.hands],
         }
 
