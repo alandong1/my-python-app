@@ -29,13 +29,14 @@ ITEMS: Dict[str, str] = {
     "wood_sword": "木剑", "iron_sword": "铁剑", "grass_armor": "草甲", "iron_armor": "铁甲",
     # 家具
     "bed": "床", "table": "桌子", "chair": "椅子", "chest": "箱子", "rug": "地毯", "lamp": "油灯",
+    "fireplace": "壁炉", "bookshelf": "书架",
 }
 
 TOOLS = ("stone_axe", "stone_pick", "hoe", "spear", "iron_axe", "iron_pick")
 # 武器：物品 → 攻击力；防具：物品 → 防御力。每人一个武器位、一个防具位。
 WEAPONS = {"wood_sword": {"name": "木剑", "attack": 4}, "iron_sword": {"name": "铁剑", "attack": 7}}
 ARMORS = {"grass_armor": {"name": "草甲", "defense": 2}, "iron_armor": {"name": "铁甲", "defense": 5}}
-FURNITURE = ("bed", "table", "chair", "chest", "rug", "lamp")
+FURNITURE = ("bed", "table", "chair", "chest", "rug", "lamp", "fireplace", "bookshelf")
 SEEDS = ("carrot_seed", "potato_seed", "corn_seed")
 
 # 吃东西的效果：物品 → (饱食, 精神, 健康, 生病几率)
@@ -127,6 +128,8 @@ RECIPES: Dict[str, dict] = {
     "table": {"name": "桌子", "in": {"wood": 4}, "out": {"table": 1}, "station": "workbench", "level": 2},
     "chair": {"name": "椅子", "in": {"wood": 2}, "out": {"chair": 1}, "station": "workbench", "level": 2},
     "chest": {"name": "箱子", "in": {"wood": 5}, "out": {"chest": 1}, "station": "workbench", "level": 2},
+    "fireplace": {"name": "壁炉", "in": {"stone": 6}, "out": {"fireplace": 1}, "station": "workbench", "level": 2},
+    "bookshelf": {"name": "书架", "in": {"wood": 5}, "out": {"bookshelf": 1}, "station": "workbench", "level": 1},
     "lamp": {"name": "油灯", "in": {"stick": 2, "fiber": 2}, "out": {"lamp": 1}, "station": "workbench",
              "level": 2},
     # 石炉
@@ -167,16 +170,18 @@ UPGRADES: Dict[str, Dict[int, dict]] = {
 }
 
 # 房子的房间大小（格）：等级 → 边长
-ROOM_SIZE = {1: 6, 2: 8, 3: 10}
+ROOM_SIZE = {1: 8, 2: 10, 3: 12}
 
 
 # 家具效果：kind → (站在旁边时每秒精神, 每秒健康, 范围（格）)
 FURNITURE_EFFECT = {
     "bed": (0.3, 0.1, 1.5),
     "lamp": (0.1, 0.0, 3.0),
+    "fireplace": (0.2, 0.05, 3.0),     # 壁炉：暖和，让人安心
+    "bookshelf": (0.1, 0.0, 2.5),      # 书架：看书让人平静
 }
 # 家具挡路的半径（格）；地毯和油灯不挡路
-FURNITURE_BLOCK = {"bed": 0.45, "table": 0.45, "chair": 0.35, "chest": 0.4}
+FURNITURE_BLOCK = {"bed": 0.45, "table": 0.45, "chair": 0.35, "chest": 0.4, "fireplace": 0.5, "bookshelf": 0.4}
 
 # ------------------------------------------------------------ 作物
 
