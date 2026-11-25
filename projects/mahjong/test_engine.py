@@ -120,8 +120,21 @@ def test_opened_pinghu_can_be_won_on_discard():
     answer(r, {1: "hu"})
     res = r.result
     assert res["type"] == "win" and res["winners"][0]["seat"] == 1
-    assert res["winners"][0]["fan"] == 1
-    assert res["deltas"] == [-1, 1, 0]
+    assert res["winners"][0]["fan"] == 1                 # 明牌 1 翻
+    assert res["winners"][0]["points"] == 2              # 2 的 1 次方
+    assert res["deltas"] == [-2, 2, 0]
+
+
+def test_cannot_open_before_tenpai():
+    r = Round(0, random.Random(20))
+    set_hands(r, [[0, 1, 2, 3, 4, 5, 6, 7, 8, 27, 28, 29, 27, 18],    # 离听牌还远
+                  [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16],
+                  [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16]])
+    r.turn = 0
+    r.drawn = True
+    assert not any(o["action"] == "open" for o in r.self_options(0))
+    with pytest.raises(GameError):
+        r.act_self(0, "open")
 
 
 def test_pinghu_self_draw_is_allowed():
@@ -134,9 +147,10 @@ def test_pinghu_self_draw_is_allowed():
     r.act_self(0, "hu")
     res = r.result
     assert res["winners"][0]["selfDraw"] is True
-    fan = res["winners"][0]["fan"]
-    assert fan == 2                               # 屁胡 1 番 + 自摸 1 番
-    assert res["deltas"] == [2 * fan, -fan, -fan]
+    w = res["winners"][0]
+    assert w["fan"] == 1                          # 屁胡不翻，自摸 1 翻
+    assert w["points"] == 2
+    assert res["deltas"] == [2 * w["points"], -w["points"], -w["points"]]
 
 
 def test_big_hu_wins_on_discard_without_opening():

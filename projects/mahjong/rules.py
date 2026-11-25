@@ -6,7 +6,7 @@
   18~26  一筒 ~ 九筒
   27~29  中、发、白（字牌只能成刻子或对子，不能成顺子）
 一种牌 4 张，共 120 张。没有东南西北，也没有花牌。
-「五星」指五万、五条、五筒（编号 4、13、22）。
+
 
 这里是按负责人给的规则实现的一版，细节见 projects/mahjong/REQUIREMENTS.md 的「规则」一节。
 """
@@ -18,7 +18,6 @@ from typing import Dict, List, Optional, Sequence, Tuple
 KINDS = 30          # 牌种数量
 COPIES = 4          # 每种几张
 HONOR_START = 27    # 字牌从 27 开始
-FIVE_KINDS = (4, 13, 22)
 SUIT_CHARS = "万条筒"
 HONOR_NAMES = ("中", "发", "白")
 SUIT_NAMES = ("万", "条", "筒")   # 缺门只可能是这三门，字牌不能缺
@@ -204,25 +203,45 @@ def shanten(c: Sequence[int], melds: int = 0) -> int:
 
 # ------------------------------------------------------------------ 番数
 
-def score_win(hand: Sequence[int], melds: List[dict], self_draw: bool) -> Tuple[int, List[Tuple[str, int]], int]:
-    """算一手和牌的番数。
+def _one_suit(hand: Sequence[int], melds: List[dict]) -> bool:
+    """清一色：所有牌（暗牌加明牌）都是同一门数牌，没有字牌。"""
+    kinds = {k for k in range(KINDS) if hand[k]}
+    kinds.update(m["kind"] for m in melds)
+    if not kinds or any(k >= HONOR_START for k in kinds):
+        return False
+    return len({suit_of(k) for k in kinds}) == 1
 
+
+def score_win(hand: Sequence[int], melds: List[dict], self_draw: bool,
+              opened: bool = False) -> Tuple[int, List[Tuple[str, int]], int]:
+    """算一手和牌的翻数。
+
+    规则：屁胡不翻（底分 1 分）；每一翻，分数翻一倍。
+      清一色 2 翻、七对 2 翻、明四归一 1 翻、暗四归一 2 翻，
+      自摸 1 翻，明牌 1 翻。
     hand 是和牌时的暗牌计数（包含胡的那张），melds 是明牌列表。
-    返回 (总番数, [(名目, 番数), ...], 不含自摸的番数)。
-    不含自摸的番数决定能不能点炮：屁胡只有 1 番，必须两番以上才能点炮，除非明牌。
+
+    返回 (总翻数, [(名目, 翻数), ...], 大胡翻数)。
+    大胡翻数只算牌型本身（七对、清一色、四归一），不含自摸和明牌。
+    它决定能不能点炮：大胡翻数至少 2，或者已经明牌，才能点炮。
     """
     items: List[Tuple[str, int]] = []
+    pattern = 0
     if not melds and all(x % 2 == 0 for x in hand):
         items.append(("七对", 2))
-    else:
-        items.append(("屁胡", 1))
-    fives = sum(hand[k] for k in FIVE_KINDS)
+        pattern += 2
+    if _one_suit(hand, melds):
+        items.append(("清一色", 2))
+        pattern += 2
     for m in melds:
-        if m["kind"] in FIVE_KINDS:
-            fives += 4 if m["type"].startswith("gang") else 3
-    if fives:
-        items.append(("五星", fives))
-    base = sum(v for _, v in items)
+        if m["type"] == "gang_an":
+            items.append(("暗四归一", 2))
+            pattern += 2
+        elif m["type"] in ("gang_ming", "gang_jia"):
+            items.append(("明四归一", 1))
+            pattern += 1
     if self_draw:
         items.append(("自摸", 1))
-    return base + (1 if self_draw else 0), items, base
+    if opened:
+        items.append(("明牌", 1))
+    return sum(v for _, v in items), items, pattern
