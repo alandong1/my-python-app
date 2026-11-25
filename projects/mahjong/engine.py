@@ -29,7 +29,7 @@ class GameError(Exception):
     """玩家的操作不合规则。"""
 
 
-ITEM_NAMES = {"swap": "偷天换日", "lucky_pong": "锦上添花", "miracle_hu": "妙手回春"}
+ITEM_NAMES = {"swap": "偷天换日", "lucky_pong": "锦上添花", "miracle_hu": "妙手回春", "steal": "釜底抽薪"}
 
 
 class Round:
@@ -55,7 +55,9 @@ class Round:
         self.last: Optional[tuple] = None         # (座位, 牌种)：最近打出的牌
         self.result: Optional[dict] = None
         self.recorded = False                     # 结果是否已经计入整场比赛
-        # 道具：房主开启后，每个人在自己回合摸牌前可以用一个道具
+        # 技能：房主开启后，摸完牌之后可以用；每局每个技能只能用一次
+        self.draw_kind: Optional[int] = None      # 这一回合摸到的那张牌
+        self.used: List[set] = [set() for _ in range(N_PLAYERS)]
         items = items or {}
         self.items_enabled = bool(items.get("enabled"))
         stock = items.get("stock") or []
@@ -64,7 +66,7 @@ class Round:
         for _ in range(13):                       # 每家 13 张
             for s in range(N_PLAYERS):
                 self.hands[s][self.wall.pop()] += 1
-        self._start_turn(dealer)                  # 庄家：有道具就先进入摸牌前，否则直接摸牌
+        self._draw_for(dealer)                    # 庄家多摸一张，直接开始出牌
 
     # ------------------------------------------------------------ 摸牌与轮转
 
@@ -74,56 +76,48 @@ class Round:
         if not self.wall:
             self._end_draw()
             return
-        self.hands[seat][self.wall.pop()] += 1
+        kind = self.wall.pop()
+        self.hands[seat][kind] += 1
+        self.draw_kind = kind
         self.drawn = True
         self.phase = "discard"
 
     def _next_turn(self) -> None:
         self.drawn = False
-        self._start_turn((self.turn + 1) % N_PLAYERS)
+        self._draw_for((self.turn + 1) % N_PLAYERS)
 
-    def _start_turn(self, seat: int) -> None:
-        """轮到 seat 的回合开始：有道具就停在「摸牌前」，让他决定用不用；否则直接摸牌。"""
-        if self.items_enabled and sum(self.stock[seat].values()) > 0:
-            self.turn = seat
-            self.drawn = False
-            self.phase = "predraw"
-        else:
-            self._draw_for(seat)
-
-    def predraw_options(self, seat: int) -> List[dict]:
-        """摸牌前能做的事：跳过（直接摸牌）或用一个道具。"""
-        if self.phase != "predraw" or seat != self.turn:
+    def item_options(self, seat: int) -> List[dict]:
+        """摸完牌之后，seat 现在能用的技能。明牌之后不能用；每局每个技能只能用一次。"""
+        if (not self.items_enabled or self.phase != "discard" or seat != self.turn
+                or not self.drawn or self.opened[seat]):
             return []
-        opts = [{"action": "skip", "kind": None, "item": None}]
-        if self.opened[seat]:
-            return opts                                   # 明牌之后只能摸打
-        for k, n in self.stock[seat].items():
-            if n > 0 and k in ITEM_NAMES:
-                opts.append({"action": "item", "kind": None, "item": k, "name": ITEM_NAMES[k]})
-        return opts
+        out: List[dict] = []
+        for k, name in ITEM_NAMES.items():
+            if self.stock[seat].get(k, 0) <= 0 or k in self.used[seat]:
+                continue
+            if k == "miracle_hu" and not self._tenpai(seat):
+                continue                          # 妙手回春：必须听牌以后才能用
+            if k == "steal" and not any(not self.opened[t] and sum(self.hands[t]) > 0
+                                        for t in range(N_PLAYERS) if t != seat):
+                continue                          # 釜底抽薪：对方不能是明牌的人
+            out.append({"item": k, "name": name})
+        return out
 
-    def act_predraw(self, seat: int, action: str, item: Optional[str] = None,
-                    kind: Optional[int] = None, src: Optional[int] = None) -> None:
-        """摸牌前的操作。action 是 skip（直接摸牌）或 item（用道具）。
+    def use_item(self, seat: int, item: str, kind: Optional[int] = None,
+                 src: Optional[int] = None, opp: Optional[int] = None) -> None:
+        """使用技能。
 
-        偷天换日：kind 是手里要换出去的牌，从牌墙随机换一张，然后照常摸牌。
-        锦上添花：从 src 的牌河里取 kind 作为碰，然后直接打牌（不摸牌）。
-        妙手回春：从 src 的牌河里取 kind 和牌，算自摸。
+        偷天换日：用自己手上的一张牌（kind）随机和牌墙里的一张牌换。
+        锦上添花：从 src 的牌河里取 kind（手上已经有一对），碰过来，然后直接打牌。
+        妙手回春：从 src 的牌河里取 kind，替换掉刚摸上来的那张牌（摸到的那张打出去）。
+        釜底抽薪：用自己手上的一张牌（kind）和对手 opp 的一张暗牌随机交换。
         """
-        if self.phase != "predraw" or seat != self.turn:
-            raise GameError("现在不能用道具")
-        if self.opened[seat] and action == "item":
-            raise GameError("明牌之后不能用道具")
-        if action == "skip":
-            self._draw_for(seat)
-            return
-        if action != "item" or item not in ITEM_NAMES or self.stock[seat].get(item, 0) <= 0:
-            raise GameError("没有这个道具")
+        if item not in [o["item"] for o in self.item_options(seat)]:
+            raise GameError("现在不能用这个技能")
         c = self.hands[seat]
         if item == "swap":
             if kind is None or c[kind] <= 0:
-                raise GameError("请选手里的一张牌")
+                raise GameError("请选手上的一张牌")
             if not self.wall:
                 raise GameError("牌墙已经没有牌了")
             idx = self.rng.randrange(len(self.wall))
@@ -131,30 +125,53 @@ class Round:
             self.wall[idx] = kind
             c[kind] -= 1
             c[tile] += 1
-            self.stock[seat][item] -= 1
-            self._draw_for(seat)
-            return
-        # 锦上添花、妙手回春：要从某家的牌河里取一张
-        if src is None or kind is None or kind not in self.discards[src]:
-            raise GameError("请选一张已经打出的牌")
-        if item == "lucky_pong":
-            if src == seat or c[kind] < 2:
-                raise GameError("只能选别人打出的、和自己已经凑成对子的牌")
+        elif item == "steal":
+            if opp is None or opp == seat or self.opened[opp] or sum(self.hands[opp]) == 0:
+                raise GameError("请选一位没有明牌的对手")
+            if kind is None or c[kind] <= 0:
+                raise GameError("请选手上的一张牌")
+            tile = self.rng.choice(R.expand(self.hands[opp]))
+            self.hands[opp][tile] -= 1
+            self.hands[opp][kind] += 1
+            c[kind] -= 1
+            c[tile] += 1
+        elif item == "lucky_pong":
+            if src is None or src == seat or kind is None or kind not in self.discards[src] or c[kind] < 2:
+                raise GameError("请选一张别人打出的、手上已经有一对的牌")
             self._take_discard(src, kind)
             c[kind] -= 2
             self.melds[seat].append({"type": "pong", "kind": kind, "from": src})
             self.stock[seat][item] -= 1
+            self.used[seat].add(item)
             self.last = None
             self.turn = seat
-            self.phase = "discard"               # 碰之后直接打牌，不摸牌
+            self.phase = "discard"               # 碰之后直接打牌
             self.drawn = False
             return
-        # miracle_hu
-        if self._can_win(seat, kind, True) is None:
-            raise GameError("这张牌不能让你和牌")
-        self._take_discard(src, kind)
+        elif item == "miracle_hu":
+            d = self.draw_kind
+            if src is None or kind is None or kind not in self.discards[src] or d is None:
+                raise GameError("请选一张已经打出的牌")
+            if d not in self.allowed_discards(seat):
+                raise GameError("摸到的这张牌不能打出去（对方明牌）")
+            self._take_discard(src, kind)
+            c[kind] += 1
+            c[d] -= 1
+            self.discards[seat].append(d)        # 摸到的那张打出去
+            self.stock[seat][item] -= 1
+            self.used[seat].add(item)
+            self.last = (seat, d)
+            self.drawn = False
+            claims = self._claims_for(seat, d)
+            if claims:
+                self.phase = "claim"
+                self.pending = claims
+                self.responses = {}
+            else:
+                self._next_turn()
+            return
         self.stock[seat][item] -= 1
-        self._win_self(seat, kind)
+        self.used[seat].add(item)
 
     def _take_discard(self, src: int, kind: int) -> None:
         """从 src 的牌河里拿走最后一张 kind。"""

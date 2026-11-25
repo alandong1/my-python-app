@@ -63,14 +63,15 @@ def test_lobby_needs_login_and_shows_wallet(client_guest):
     r = client_guest.get("/apps/mahjong/api/lobby")
     assert r.status_code == 200
     data = r.json()
-    assert data["me"]["points"] == 0
-    assert set(data["shop"]) == {"swap", "lucky_pong", "miracle_hu"}
+    assert data["me"]["points"] == 10000
+    assert set(data["shop"]) == {"swap", "lucky_pong", "miracle_hu", "steal"}
     assert data["myRoom"] is None and data["rooms"] == []
 
 
-def test_buying_without_points_is_refused(client_guest):
+def test_buying_a_skill_takes_points(client_guest):
     r = client_guest.post("/apps/mahjong/api/shop/buy", json={"item": "swap"})
-    assert r.json() == {"ok": False, "text": "积分不够"}
+    assert r.json()["ok"] is True and r.json()["points"] == 10000 - 20
+    assert r.json()["items"]["swap"] == 1
 
 
 def test_solo_game_plays_a_full_round_to_the_end(client_guest):
@@ -82,9 +83,7 @@ def test_solo_game_plays_a_full_round_to_the_end(client_guest):
             if state["state"] in ("round_end", "match_end"):
                 break
             rnd = state["round"]
-            if rnd["phase"] == "predraw" and rnd["turn"] == state["you"]:
-                ws.send_json({"type": "predraw", "action": "skip"})
-            elif rnd["phase"] == "discard" and rnd["turn"] == state["you"]:
+            if rnd["phase"] == "discard" and rnd["turn"] == state["you"]:
                 hu = [o for o in rnd["self"] if o["action"] == "hu"]
                 if hu:
                     ws.send_json({"type": "self", "action": "hu"})

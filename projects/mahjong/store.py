@@ -7,32 +7,56 @@ from sqlalchemy import select
 
 from app.db import User, get_db
 
-from .models import MahjongItemStock, MahjongWallet
+from .models import MahjongItemStock, MahjongMeta, MahjongWallet
 
-# 道具：名字和价格（积分）
+START_POINTS = 10000      # 每个玩家的起始积分（新玩家第一次进来就有）
+
+# 技能：名字和价格（积分）。所有技能都是摸完牌之后使用，每局每个只能用一次。
 ITEMS: Dict[str, dict] = {
     "swap": {"name": "偷天换日", "price": 20},
     "lucky_pong": {"name": "锦上添花", "price": 20},
     "miracle_hu": {"name": "妙手回春", "price": 50},
+    "steal": {"name": "釜底抽薪", "price": 30},
 }
+
+
+def _wallet(db, uid: int) -> MahjongWallet:
+    """拿到这个账号的钱包；没有就新建，给起始积分。"""
+    w = db.get(MahjongWallet, uid)
+    if w is None:
+        w = MahjongWallet(user_id=uid, points=START_POINTS)
+        db.add(w)
+        db.flush()
+    return w
+
+
+def grant_once() -> None:
+    """给所有已经存在的账号发一次起始积分（只发一次）。"""
+    with get_db() as db:
+        if db.get(MahjongMeta, "grant_start_points_v1"):
+            return
+        for uid in db.scalars(select(User.id)):
+            w = db.get(MahjongWallet, uid)
+            if w is None:
+                db.add(MahjongWallet(user_id=uid, points=START_POINTS))
+            else:
+                w.points += START_POINTS
+        db.add(MahjongMeta(key="grant_start_points_v1", value="1"))
 
 
 def wallet(uid: int) -> dict:
     with get_db() as db:
-        w = db.get(MahjongWallet, uid)
+        w = _wallet(db, uid)
         stock = {k: 0 for k in ITEMS}
         for row in db.scalars(select(MahjongItemStock).where(MahjongItemStock.user_id == uid)):
             if row.item in stock:
                 stock[row.item] = row.count
-        return {"points": w.points if w else 0, "items": stock}
+        return {"points": w.points, "items": stock}
 
 
 def add_points(uid: int, delta: int) -> None:
     with get_db() as db:
-        w = db.get(MahjongWallet, uid)
-        if w is None:
-            w = MahjongWallet(user_id=uid, points=0)
-            db.add(w)
+        w = _wallet(db, uid)
         w.points += delta
         db.commit()
 
@@ -43,8 +67,8 @@ def buy(uid: int, item: str) -> bool:
         raise ValueError(item)
     price = ITEMS[item]["price"]
     with get_db() as db:
-        w = db.get(MahjongWallet, uid)
-        if w is None or w.points < price:
+        w = _wallet(db, uid)
+        if w.points < price:
             return False
         w.points -= price
         row = db.get(MahjongItemStock, (uid, item))

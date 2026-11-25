@@ -14,5 +14,6 @@ PROJECT = Project(
     status="测试中",
     requires_login=True,   # 游客也算登录：同一个浏览器就是同一个账号
     router=server.router,
+    startup=server.startup,
     static_dir=server.STATIC,
 )
