@@ -145,9 +145,6 @@ UPGRADES: Dict[str, Dict[int, dict]] = {
 # 房子的房间大小（格）：等级 → 边长
 ROOM_SIZE = {1: 6, 2: 8, 3: 10}
 
-# 火堆：每根柴烧多少秒（等级 → 秒）
-FUEL_SECONDS = {1: 60, 2: 90, 3: 120}
-FUEL_MAX = 600                     # 最多烧到多少秒（防止无限堆柴）
 
 # 家具效果：kind → (站在旁边时每秒精神, 每秒健康, 范围（格）)
 FURNITURE_EFFECT = {
@@ -171,6 +168,28 @@ WILD_SEED_CHANCE = 0.2            # 采草本植物时掉种子的几率
 # 工具等级：砍树时每下额外多得的木材
 AXE_BONUS = {"stone_axe": 1, "iron_axe": 2}
 
+# 采集的数量：资源 → (得到的物品, 中间值, 浮动)。每次采集在 [中间值-浮动, 中间值+浮动] 里随机。
+# 进度条走完时一次性全部拿到（砍倒、采空、挖掉）。
+YIELD = {
+    "tree": ("wood", 7, 2),
+    "rock": ("stone", 5, 1),
+    "bush": ("berry", 4, 1),
+    "herb": ("herb", 3, 1),
+    "reed": ("fiber", 4, 1),
+    "shell": ("shell", 2, 1),
+    "mushroom": ("mushroom", 2, 1),
+}
+COCONUT_CHANCE = 0.6      # 砍倒一棵树时掉椰子的几率
+
+# 篝火：每根柴烧多久（秒）、最多能攒多久、照亮多远（格）。越高级越久、越亮。
+FUEL_SECONDS = {1: 180, 2: 360, 3: 600}
+FUEL_MAX = 1200
+LIGHT_RADIUS = {1: 3.5, 2: 5.5, 3: 8.0}
+
+# 昼夜：现实 1 分钟 = 游戏 1 小时，所以 1 天 = 24 分钟。白天 18 分钟，夜晚 6 分钟，游戏从白天开始。
+DAY_LEN = 18 * 60         # 白天的秒数（现实时间）
+DAY_TOTAL = 24 * 60       # 一天的秒数（现实时间）
+
 # 动作要花的时间（秒）：按下互动后，进度条走完才算成功
 WORK_TIME = {"tree": 3.0, "rock": 2.0, "bush": 1.2, "herb": 1.2, "reed": 1.2,
              "shell": 0.8, "mushroom": 0.8, "animal": 0.8, "fish": 2.5}
@@ -181,3 +200,6 @@ WORK_LABEL = {"tree": "砍树", "rock": "采石", "bush": "采集", "herb": "采
 TREE_TOOL_SPEED = {"stone_axe": 0.7, "iron_axe": 0.5}
 ROCK_TOOL_SPEED = {"stone_pick": 0.7, "iron_pick": 0.5}
 SPEAR_SPEED = 0.6
+# 一次互动最多同时采几个同类的资源（树、石头、灌木丛……）。时间按个数加长，但比逐个采快。
+BATCH_MAX = 3
+BATCH_TIME_STEP = 0.6     # 每多一个，时间多出 60% 的基础时间

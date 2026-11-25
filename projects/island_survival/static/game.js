@@ -8,6 +8,7 @@ const TERRAIN_C = ['#1d4a72', '#3f93bd', '#e3cf93', '#6aa347', '#3a7535'];
 const ROLE_COLOR = { chef: 0xe07b39, doctor: 0xf2f2f2, priest: 0x7a5cc4 };
 const CROP_COLOR = { carrot: '#ff8c2b', potato: '#a77a3f', corn: '#f2c230' };
 const HORIZON = '#cfe6f2';
+const DAY_FOG = new THREE.Color(HORIZON), NIGHT_FOG = new THREE.Color('#1a2238');
 // 远端玩家和动物按「过去 100 毫秒」的画面显示：服务器每 0.1 秒发一次，网络有快有慢，
 // 延迟 100 毫秒后就有两个快照可以匀速插值，画面不会一顿一顿。（和 strike 的做法相同）
 const INTERP_MS = 100;
@@ -20,6 +21,8 @@ let roomGroup = null, roomKey = '', lastHouse = undefined;
 const keys = new Set();
 let joy = { x: 0, y: 0 };
 let lastInvKey = '', toastTimer = 0, lastFrame = 0;
+let nightK = 0;                      // 0 = 白天，1 = 夜晚，中间是傍晚和黎明（画面平滑过渡）
+let clockInfo = null;
 const shared = {};
 const focus = new THREE.Vector3();   // 镜头盯着的点
 
@@ -115,10 +118,12 @@ function initScene() {
   scene = new THREE.Scene();
   scene.fog = new THREE.Fog(HORIZON, 70, 190);
   camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
-  scene.add(makeSky());
+  shared.sky = makeSky();
+  scene.add(shared.sky);
 
   // 天光 + 太阳（会投影的主光）
-  scene.add(new THREE.HemisphereLight('#cfe6ff', '#4a5a3a', 1.0));
+  shared.hemi = new THREE.HemisphereLight('#cfe6ff', '#4a5a3a', 1.0);
+  scene.add(shared.hemi);
   sun = new THREE.DirectionalLight('#ffe6bd', 2.2);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -192,6 +197,12 @@ function initScene() {
   shared.glow = new THREE.MeshBasicMaterial({ color: '#ffb347' });
   shared.furnMat = new THREE.MeshStandardMaterial({ color: '#5b5750', roughness: 0.9 });
   shared.cloth = new THREE.MeshStandardMaterial({ color: '#8b3a3a', roughness: 1 });
+  shared.arm = new THREE.BoxGeometry(0.14, 0.6, 0.14);
+  shared.handle = new THREE.BoxGeometry(0.07, 0.6, 0.07);
+  shared.axeHead = new THREE.BoxGeometry(0.22, 0.16, 0.06);
+  shared.pickHead = new THREE.BoxGeometry(0.34, 0.07, 0.07);
+  shared.spearShaft = new THREE.BoxGeometry(0.05, 1.5, 0.05);
+  shared.metal = new THREE.MeshStandardMaterial({ color: '#9aa3ab', roughness: 0.4, metalness: 0.6 });
 }
 
 // 天空：从地平线的雾色渐变到头顶的蓝
@@ -450,11 +461,29 @@ function makeAnimal(kind) {
 function makePlayer(p) {
   const [id, name, r] = p;
   const g = new THREE.Group();
+  const torso = new THREE.Group();          // 上半身：弯腰、挥手都是转它
   const body = new THREE.Mesh(shared.body, new THREE.MeshStandardMaterial({ color: ROLE_COLOR[r] || 0xffffff, roughness: 0.6 }));
   body.position.y = 0.45;
   const head = new THREE.Mesh(shared.head, shared.skin);
   head.position.y = 1.15;
-  g.add(body, head);
+  // 右手：肩膀是转轴，手里拿着工具（只显示正在用的那个）
+  const arm = new THREE.Group();
+  arm.position.set(0.32, 0.95, 0);
+  const hand = new THREE.Mesh(shared.arm, shared.skin);
+  hand.position.y = -0.3;
+  arm.add(hand);
+  const tools = {
+    axe: toolMesh([shared.axeHead, 0, -0.62, 0.1], shared.wood, shared.metal),
+    pick: toolMesh([shared.pickHead, 0, -0.62, 0.1], shared.wood, shared.metal),
+    spear: toolMesh(null, shared.wood, shared.metal),
+  };
+  tools.spear.children[0].geometry = shared.spearShaft;   // 鱼叉用长杆
+  tools.spear.children[0].position.set(0, 0, 0.1);
+  tools.spear.position.set(0, -0.35, 0.25);
+  tools.spear.rotation.x = Math.PI / 2;
+  for (const t of Object.values(tools)) { t.visible = false; arm.add(t); }
+  torso.add(body, head, arm);
+  g.add(torso);
   if (id === myId) {
     const ring = new THREE.Mesh(shared.ring, shared.ringMat);
     ring.rotation.x = -Math.PI / 2;
@@ -462,7 +491,61 @@ function makePlayer(p) {
     g.add(ring);
   }
   g.add(nameTag(name));
+  g.userData.torso = torso;
+  g.userData.arm = arm;
+  g.userData.tools = tools;
+  g.userData.phase = (id * 0.37) % 6.28;      // 每个人的动作节奏不一样
+  g.userData.swing = 0;
   return cast(g);
+}
+
+// 工具：柄 + 头（斧子、镐子）
+function toolMesh(headSpec, handleMat, headMat) {
+  const g = new THREE.Group();
+  const handle = new THREE.Mesh(shared.handle, handleMat);
+  handle.position.set(0, -0.3, 0.1);
+  g.add(handle);
+  if (headSpec) {
+    const [geo, x, y, z] = headSpec;
+    const head = new THREE.Mesh(geo, headMat);
+    head.position.set(x, y, z);
+    g.add(head);
+  }
+  return g;
+}
+
+// 动作动画：根据别人（和自己）正在做的事，挥手、弯腰、刺
+const ARM_REST = 0;
+function animatePlayer(mesh, t, dt) {
+  const d = mesh.userData;
+  if (!d.torso) return;
+  const act = d.act || '';
+  const ph = d.phase;
+  const ease = Math.min(1, dt * 12);
+  let armTarget = ARM_REST, torsoTarget = 0;
+  const tools = d.tools;
+  const show = { axe: false, pick: false, spear: false };
+  if (act === 'tree') {                       // 砍树：举起斧子，用力劈下
+    const s = (Math.sin(t * 5 + ph) + 1) / 2;
+    armTarget = -1.9 + 1.9 * s;
+    show.axe = true;
+  } else if (act === 'rock') {                // 采石：镐子大幅度地砸
+    const s = (Math.sin(t * 4 + ph) + 1) / 2;
+    armTarget = -2.2 + 2.2 * s;
+    show.pick = true;
+  } else if (act === 'bush' || act === 'herb' || act === 'reed' || act === 'shell' || act === 'mushroom') {
+    torsoTarget = 0.85;                       // 采集：弯下腰伸手去拿
+    armTarget = 0.5 + 0.15 * Math.sin(t * 3 + ph);
+  } else if (act === 'animal') {              // 攻击：往前一刺
+    armTarget = -1.3 + 0.9 * Math.max(0, Math.sin(t * 9 + ph));
+    show.spear = false;
+  } else if (act === 'fish') {                // 钓鱼：手伸向海面
+    armTarget = -1.1 + 0.06 * Math.sin(t * 2 + ph);
+  }
+  d.swing += (armTarget - d.swing) * ease;
+  d.arm.rotation.x = d.swing;
+  d.torso.rotation.x += (torsoTarget - d.torso.rotation.x) * ease;
+  for (const k of Object.keys(show)) tools[k].visible = show[k];
 }
 
 function nameTag(text) {
@@ -517,10 +600,18 @@ function makeBuilding(kind, level, state) {
       g.add(log);
     }
     if (lit) {
+      // 等级越高，火苗越大、灯光越亮、照得越远
+      const scale = 0.8 + 0.35 * level;
       const flame = new THREE.Mesh(shared.flame, shared.flameMat);
       flame.position.y = 0.45;
+      flame.scale.setScalar(scale);
       flame.userData.flame = true;
+      flame.userData.base = scale;
       g.add(flame);
+      const radius = (info.lightRadius && info.lightRadius[String(level)]) || 3.5;
+      const light = new THREE.PointLight('#ffb060', 1.2 + 0.7 * level, radius * 1.6);
+      light.position.y = 0.8;
+      g.add(light);
     }
   } else if (kind === 'furnace') {
     g.add(box(0.9, 1.1, 0.9, shared.furnMat, 0, 0.55, 0));
@@ -597,6 +688,7 @@ function applyState(s) {
     lastHouse = house;
   }
   setBars(m);
+  if (s.clock) setClock(s.clock);
   setInventory(m.inv, house !== null);
   setLog(m.events);
   $('meName').textContent = m.name;
@@ -611,12 +703,13 @@ function applyState(s) {
     let mesh = players.get(id);
     if (!mesh) {
       mesh = makePlayer(p);
-      mesh.userData = { samples: [] };
+      mesh.userData.samples = [];
       scene.add(mesh);
       players.set(id, mesh);
     }
     pushSample(mesh, x, z);
     mesh.userData.dead = p[5];
+    mesh.userData.act = p[7] || '';
   }
   removeMissing(players, seen);
   $('survivors').textContent = `岛上幸存者：${s.players.length} 人 · ` +
@@ -706,7 +799,8 @@ function updateActions(s) {
   ib.hidden = !label;
   if (label) {
     const pct = me.work ? Math.round(me.work.progress * 100) : 0;
-    ib.textContent = me.work ? `${label}… ${pct}%` : `${label} E`;
+    const count = me.work && me.work.n > 1 ? ` ×${me.work.n}` : '';
+    ib.textContent = me.work ? `${label}${count}… ${pct}%` : `${label} E`;
     // 进度条：按钮的背景从左到右填满
     ib.style.background = me.work
       ? `linear-gradient(90deg, #2f7d5b ${pct}%, rgba(40, 60, 50, 0.92) ${pct}%)` : '';
@@ -871,6 +965,13 @@ function removeMissing(map, seen) {
   for (const [id, obj] of map) {
     if (!seen.has(id)) { scene.remove(obj); map.delete(id); }
   }
+}
+
+// 昼夜时钟：第几天、白天还是夜晚、离下一个阶段还有几分钟（现实 1 分钟 = 游戏 1 小时）
+function setClock(c) {
+  clockInfo = c;
+  const mins = Math.ceil(c.left / 60);
+  $('clock').textContent = `第 ${c.day} 天 · ${c.night ? '夜晚' : '白天'} · ${c.night ? '天亮还有' : '距离夜晚'}约 ${mins} 分钟`;
 }
 
 function setBars(m) {
@@ -1217,6 +1318,7 @@ function frame(now) {
     if (Math.abs(s.vx) + Math.abs(s.vz) > 1e-4) mesh.rotation.y = Math.atan2(s.vx, s.vz);
     const target = mesh.userData.dead ? Math.PI / 2 : 0;
     mesh.rotation.z += (target - mesh.rotation.z) * Math.min(1, dt * 10);
+    animatePlayer(mesh, t, dt);
   }
   for (const mesh of animals.values()) {
     const s = sampleAt(mesh, renderT);
@@ -1226,7 +1328,9 @@ function frame(now) {
   }
   // 火堆的火苗闪动
   for (const entry of buildings.values()) {
-    entry.group.children.forEach((c) => { if (c.userData.flame) c.scale.setScalar(0.9 + 0.15 * Math.sin(t * 12 + c.position.y)); });
+    entry.group.children.forEach((c) => {
+        if (c.userData.flame) c.scale.setScalar(c.userData.base * (0.9 + 0.15 * Math.sin(t * 12 + c.position.y)));
+      });
   }
 
   // 镜头盯着自己的模型（插值后的位置），再平滑地跟过去
@@ -1241,6 +1345,12 @@ function frame(now) {
   placeInteract();
 
   if (!inside) {
+    // 昼夜：天色、光线、雾色随时间平滑变化
+    if (clockInfo) nightK += ((clockInfo.night ? 1 : 0) - nightK) * Math.min(1, dt * 0.4);
+    sun.intensity = 2.2 + (0.25 - 2.2) * nightK;
+    shared.hemi.intensity = 1.0 + (0.45 - 1.0) * nightK;
+    shared.sky.material.color.setScalar(1 - 0.75 * nightK);
+    scene.fog.color.lerpColors(DAY_FOG, NIGHT_FOG, nightK);
     // 太阳和阴影跟着镜头走：阴影只需要覆盖身边这一块，清晰又省资源
     sun.position.set(focus.x + 60, focus.y + 90, focus.z + 30);
     sun.target.position.copy(focus);
