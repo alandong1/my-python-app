@@ -1064,3 +1064,27 @@ def test_place_furniture_in_the_bigger_room_corners(spot):
     assert len(house.furniture) == 1
     g.act(p, "place", {"item": "bookshelf", "fx": -1, "fz": 0})
     assert {f["kind"] for f in house.furniture} == {"fireplace", "bookshelf"}
+
+
+# ------------------------------------------------------------ 装备：手里的工具
+
+def test_tool_can_be_equipped_in_the_tool_slot_and_shown_to_others(g):
+    p = g.join(70, "甲", "chef")
+    q = g.join(71, "乙", "doctor")
+    p.inv = {"stone_axe": 1}
+    g.act(p, "equip", {"item": "stone_axe"})
+    assert p.equip == {"tool": "stone_axe"}
+    g.act(p, "equip", {"item": "stone_axe"})            # 再点一次就拿下来
+    assert p.equip == {}
+    g.act(p, "equip", {"item": "stone_axe"})
+    row = next(r for r in g.view(q, False)["players"] if r[0] == p.id)
+    assert row[8] == "stone_axe"                        # 别人能看到你手里拿的东西
+
+
+def test_weapon_is_shown_when_no_tool_is_held(g):
+    p = g.join(72, "甲", "chef")
+    p.inv = {"wood_sword": 1, "stone_axe": 1}
+    g.act(p, "equip", {"item": "stone_axe"})
+    g.act(p, "equip", {"item": "wood_sword"})
+    row = next(r for r in g.view(p, False)["players"] if r[0] == p.id)
+    assert row[8] == "wood_sword"                       # 有武器就显示武器

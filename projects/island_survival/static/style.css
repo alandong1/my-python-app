@@ -180,3 +180,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 .ring b { bottom: 4px; font-size: 10px; font-weight: 600; }
 /* 对话框平时只占一行，超出的省略 */
 #log:not(.open) p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 背包的标签页：背包 / 装备 */
+.inv-tabs { display: flex; gap: 4px; margin: 6px 0 2px; }
+.inv-tabs .tab { padding: 3px 10px; font-size: 12px; background: var(--bar-bg); color: var(--ink); }
+.inv-tabs .tab.on { background: var(--accent); color: #fff; }
