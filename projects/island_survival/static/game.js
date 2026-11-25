@@ -955,6 +955,11 @@ function showRoom(room) {
       light.position.set(x, 1.4, z);
       roomGroup.add(light);
     }
+    if (kind === 'fireplace') {                      // 壁炉的火光比油灯更暖、更亮
+      const light = new THREE.PointLight('#ff8a3a', 9, 9);
+      light.position.set(x, 1.0, z);
+      roomGroup.add(light);
+    }
   }
   roomScene.add(roomGroup);
 }
@@ -980,6 +985,15 @@ function furnitureMesh(kind) {
   } else if (kind === 'lamp') {
     g.add(box(0.12, 1.1, 0.12, shared.wood, 0, 0.55, 0));
     g.add(box(0.3, 0.25, 0.3, shared.glow, 0, 1.2, 0));
+  } else if (kind === 'fireplace') {
+    g.add(box(1.4, 1.1, 0.5, shared.stone, 0, 0.55, 0));           // 石头砌的壁炉
+    g.add(box(0.7, 0.45, 0.1, shared.glow, 0, 0.4, 0.27));           // 炉膛里的火
+    g.add(box(1.6, 0.1, 0.6, shared.woodLight, 0, 1.15, 0));         // 炉台
+  } else if (kind === 'bookshelf') {
+    g.add(box(1.0, 1.6, 0.4, shared.wood, 0, 0.8, 0));
+    for (const [y, c] of [[0.35, '#a33b2e'], [0.75, '#2e6a9a'], [1.15, '#7a9a2e']]) {   // 三层书
+      g.add(box(0.85, 0.3, 0.3, new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 }), 0, y, 0.05));
+    }
   }
   return cast(g);
 }

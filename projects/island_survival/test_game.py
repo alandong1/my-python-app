@@ -452,7 +452,7 @@ def test_house_upgrade_makes_room_bigger(spot):
     place(p, house.x + 1.5, house.z + 3.6)
     p.inv = {"wood": 20, "stone": 10, "rope": 4}
     g.act(p, "upgrade", {})
-    assert house.level == 2 and C.ROOM_SIZE[2] == 8
+    assert house.level == 2 and C.ROOM_SIZE[2] == 10
 
 
 def test_outdoor_actions_refused_inside(spot):
@@ -1024,3 +1024,43 @@ def test_wolf_night_state_is_saved(g):
     d = json.loads(json.dumps(g.to_dict()))
     g2 = Game.from_dict(d)
     assert g2.wolf_night is True
+
+
+# ------------------------------------------------------------ 第三阶段第三批：房间更大、更多家具
+
+def test_rooms_get_bigger_with_each_upgrade():
+    assert [C.ROOM_SIZE[1], C.ROOM_SIZE[2], C.ROOM_SIZE[3]] == [8, 10, 12]
+
+
+def test_fireplace_and_bookshelf_are_furniture_and_recipes_exist():
+    assert "fireplace" in C.FURNITURE and "bookshelf" in C.FURNITURE
+    assert C.RECIPES["fireplace"]["station"] == "workbench" and C.RECIPES["fireplace"]["level"] == 2
+    assert C.RECIPES["bookshelf"]["in"] == {"wood": 5}
+
+
+def test_fireplace_warms_and_bookshelf_calms_inside_the_house(spot):
+    g, p, x, z = spot
+    house = build_house(g, p)
+    place(p, house.x + 1.5, house.z + 3.6)
+    g.act(p, "enter", {})
+    house.furniture.append({"id": g._new_id(), "kind": "fireplace", "x": p.x, "z": p.z})
+    p.sanity = 50.0
+    p.health = 80.0
+    for _ in range(50):
+        g.tick()
+    assert p.sanity > 50 - 0.02 * 5 + 0.2 * 5 * 0.9
+    assert p.health > 80
+
+
+def test_place_furniture_in_the_bigger_room_corners(spot):
+    g, p, x, z = spot
+    house = build_house(g, p)
+    place(p, house.x + 1.5, house.z + 3.6)
+    g.act(p, "enter", {})
+    size = C.ROOM_SIZE[house.level]
+    p.x, p.z = size - 0.7, size - 1.3
+    p.inv = {"fireplace": 1, "bookshelf": 1}
+    g.act(p, "place", {"item": "fireplace", "fx": 0, "fz": -1})
+    assert len(house.furniture) == 1
+    g.act(p, "place", {"item": "bookshelf", "fx": -1, "fz": 0})
+    assert {f["kind"] for f in house.furniture} == {"fireplace", "bookshelf"}
