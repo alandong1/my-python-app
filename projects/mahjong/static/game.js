@@ -44,24 +44,35 @@
     4: [[32, 44], [68, 44], [32, 96], [68, 96]],
     5: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]],
     6: [[32, 36], [68, 36], [32, 70], [68, 70], [32, 104], [68, 104]],
-    7: [[32, 34], [68, 34], [32, 70], [50, 70], [68, 70], [32, 106], [68, 106]],
+    7: [[26, 30], [46, 50], [68, 72], [30, 100], [52, 100], [30, 124], [52, 124]],
     8: [[32, 34], [68, 34], [32, 62], [68, 62], [32, 90], [68, 90], [32, 118], [68, 118]],
     9: [[30, 36], [50, 36], [70, 36], [30, 70], [50, 70], [70, 70], [30, 104], [50, 104], [70, 104]],
   };
 
+  // 每个圆点的颜色（参照参考图）
+  const GREEN_DOT = '#2e8b57', RED_DOT = '#c0392b', BLACK_DOT = '#333';
+  function dotColor(n, i) {
+    if (n === 4) return GREEN_DOT;
+    if (n === 5) return i === 2 ? RED_DOT : GREEN_DOT;
+    if (n === 6) return i < 2 ? GREEN_DOT : RED_DOT;
+    if (n === 7) return i < 3 ? GREEN_DOT : RED_DOT;
+    if (n === 8) return BLACK_DOT;
+    if (n === 9) return Math.floor(i / 3) === 1 ? RED_DOT : GREEN_DOT;
+    return BLUE;
+  }
+
   function dotFace(n) {
-    const r = n === 1 ? 26 : (n <= 3 ? 16 : (n <= 6 ? 13 : 10));
+    const r = n === 1 ? 26 : (n <= 3 ? 16 : (n <= 6 ? 13 : (n === 7 ? 11 : 10)));
     const dots = DOT_LAYOUT[n].map(([x, y], i) => {
-      // 1 筒是同心圆：中间红、中间绿、外圈蓝；5 筒的中间一点是红色
+      // 1 筒是同心圆：中间红、中间绿、外圈蓝
       if (n === 1) {
         return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${BLUE}" stroke-width="4"/>` +
           `<circle cx="${x}" cy="${y}" r="${r * 0.62}" fill="none" stroke="${GREEN}" stroke-width="4"/>` +
           `<circle cx="${x}" cy="${y}" r="${r * 0.28}" fill="${RED}"/>`;
       }
-      const isCenterRed = n === 5 && i === 2;
-      const ring = isCenterRed ? RED : BLUE;
-      return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${ring}" stroke-width="3.5"/>` +
-        `<circle cx="${x}" cy="${y}" r="${r * 0.55}" fill="none" stroke="${isCenterRed ? RED : GREEN}" stroke-width="3"/>`;
+      const c = dotColor(n, i);
+      return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${c}" stroke-width="3.5"/>` +
+        `<circle cx="${x}" cy="${y}" r="${r * 0.55}" fill="none" stroke="${c}" stroke-width="3"/>`;
     }).join('');
     return `<svg viewBox="0 0 100 140" aria-hidden="true">${dots}</svg>`;
   }
@@ -71,11 +82,10 @@
     2: { w: 16, h: 80, pos: [[36, 70], [64, 70]] },
     3: { w: 16, h: 46, pos: [[50, 40], [34, 100], [66, 100]] },
     4: { w: 16, h: 46, pos: [[34, 44], [66, 44], [34, 100], [66, 100]] },
-    5: { w: 15, h: 44, pos: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]], redIndex: 2 },
+    5: { w: 15, h: 44, pos: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]], reds: [2] },
     6: { w: 13, h: 50, pos: [[30, 46], [50, 46], [70, 46], [30, 96], [50, 96], [70, 96]] },   // 三列两行的竖条
-    7: { w: 14, h: 24, pos: [[50, 28], [34, 60], [66, 60], [34, 92], [66, 92], [34, 124], [66, 124]] },
-    8: { w: 11, h: 42, pos: [[20, 48], [40, 48], [60, 48], [80, 48], [20, 98], [40, 98], [60, 98], [80, 98]] },
-    9: { w: 13, h: 26, pos: [[30, 34], [50, 34], [70, 34], [30, 70], [50, 70], [70, 70], [30, 106], [50, 106], [70, 106]] },
+    7: { w: 14, h: 30, pos: [[50, 26], [30, 70], [50, 70], [70, 70], [30, 116], [50, 116], [70, 116]], reds: [0] },
+    9: { w: 13, h: 26, pos: [[30, 34], [50, 34], [70, 34], [30, 70], [50, 70], [70, 70], [30, 106], [50, 106], [70, 106]], reds: [1, 4, 7] },
   };
 
   function stickSvg(x, y, w, h, red) {
@@ -109,10 +119,25 @@
     </svg>`;
   }
 
+  // 8 条：两个 M 形，每个由左右两根竖竹和中间两根斜竹组成
+  function bamboo8Svg() {
+    const line = (x1, y1, x2, y2) =>
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#0f4d28" stroke-width="13" stroke-linecap="round"/>` +
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#2e8b57" stroke-width="9" stroke-linecap="round"/>`;
+    let out = '';
+    for (const y0 of [22, 84]) {
+      out += line(28, y0, 28, y0 + 44) + line(72, y0, 72, y0 + 44);
+      out += line(28, y0, 50, y0 + 26) + line(72, y0, 50, y0 + 26);
+    }
+    return `<svg viewBox="0 0 100 140" aria-hidden="true">${out}</svg>`;
+  }
+
   function bambooFace(n) {
     if (n === 1) return peacockSvg();
+    if (n === 8) return bamboo8Svg();
     const L = BAMBOO_LAYOUT[n];
-    const sticks = L.pos.map(([cx, cy], i) => stickSvg(cx - L.w / 2, cy - L.h / 2, L.w, L.h, i === L.redIndex)).join('');
+    const reds = L.reds || [];
+    const sticks = L.pos.map(([cx, cy], i) => stickSvg(cx - L.w / 2, cy - L.h / 2, L.w, L.h, reds.includes(i))).join('');
     return `<svg viewBox="0 0 100 140" aria-hidden="true">${sticks}</svg>`;
   }
 
@@ -122,6 +147,12 @@
       <text x="50" y="66" text-anchor="middle" font-size="60" font-weight="700" fill="${RED}" font-family="serif">${NUM_CH[n - 1]}</text>
       <text x="50" y="126" text-anchor="middle" font-size="44" font-weight="700" fill="${RED}" font-family="serif">萬</text>
     </svg>`;
+  }
+
+  function windFace(kind) {
+    const ch = ['东', '南', '西', '北'][kind - 30];
+    return `<svg viewBox="0 0 100 140" aria-hidden="true">
+      <text x="50" y="92" text-anchor="middle" font-size="76" font-weight="700" fill="#1d2a24" font-family="serif">${ch}</text></svg>`;
   }
 
   function honorFace(kind) {
@@ -140,6 +171,7 @@
   }
 
   function faceSvg(kind) {
+    if (kind >= 30) return windFace(kind);
     if (kind >= 27) return honorFace(kind);
     const suit = Math.floor(kind / 9);
     const n = (kind % 9) + 1;

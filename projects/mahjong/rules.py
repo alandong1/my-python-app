@@ -15,11 +15,14 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Dict, List, Optional, Sequence, Tuple
 
-KINDS = 30          # 牌种数量
+KINDS = 30          # 武汉麻将用到的牌种数量（万条筒 + 中发白）
 COPIES = 4          # 每种几张
 HONOR_START = 27    # 字牌从 27 开始
+WIND_START = 30     # 风牌（东南西北）从 30 开始：定义在这里，但武汉麻将不发这些牌
+ALL_KINDS = 34      # 全部牌种数量（含风牌），给别的规则以后使用
 SUIT_CHARS = "万条筒"
 HONOR_NAMES = ("中", "发", "白")
+WIND_NAMES = ("东", "南", "西", "北")
 SUIT_NAMES = ("万", "条", "筒")   # 缺门只可能是这三门，字牌不能缺
 
 
@@ -30,6 +33,8 @@ def suit_of(k: int) -> int:
 
 def kind_name(k: int) -> str:
     """牌种编号 -> 显示名，例如 4 -> 五万，27 -> 中。"""
+    if k >= WIND_START:
+        return WIND_NAMES[k - WIND_START]
     if k >= HONOR_START:
         return HONOR_NAMES[k - HONOR_START]
     return f"{k % 9 + 1}{SUIT_CHARS[k // 9]}"

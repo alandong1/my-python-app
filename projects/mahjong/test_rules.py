@@ -26,6 +26,12 @@ def test_kind_names():
     assert R.kind_name(29) == "白"
 
 
+def test_wind_names_are_defined_for_other_rules():
+    assert R.kind_name(30) == "东"
+    assert R.kind_name(33) == "北"
+    assert R.ALL_KINDS == 34 and R.WIND_START == 30
+
+
 def test_honor_triplet_and_pair_can_win():
     c = R.counts_of([0, 1, 2, 3, 4, 5, 6, 7, 8, 27, 27, 27, 28, 28])   # 字牌刻子 + 对子
     assert R.is_win(c, 0)
