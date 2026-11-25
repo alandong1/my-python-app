@@ -322,6 +322,7 @@
     renderCenter();
     renderActions();
     renderHint();
+    renderNotes();
   }
 
   function seatTags(i) {
@@ -372,7 +373,8 @@
 
     if (isMe) {
       const hand = el('div', 'tiles hand hand-wrap');
-      const clickable = canDiscard();
+      // 明牌之后只能打摸到的那张（托管：摸什么打什么）
+      const clickable = canDiscard() && !r.opened[view.you];
       const handTarget = targeting && (targeting.item === 'swap' || (targeting.item === 'steal' && targeting.opp !== undefined))
         && r.phase === 'discard' && r.turn === view.you && r.drawKind !== null;
       const swapping = handTarget;
@@ -491,6 +493,13 @@
         bar.append(btn('不用道具', 'pass', () => { showItems = false; renderTable(); }));
       }
     }
+  }
+
+  function renderNotes() {
+    const box = $('notes');
+    box.replaceChildren();
+    const notes = (view.round && view.round.notes) || [];
+    for (const n of notes.slice(-4)) box.append(el('div', 'note', n));
   }
 
   function renderHint() {

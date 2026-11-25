@@ -152,3 +152,31 @@ def test_store_new_players_start_with_ten_thousand_and_steal_costs_thirty(client
     assert store.wallet(uid)["items"]["steal"] == 1
     board = store.leaderboard()
     assert board[0]["points"] >= 10000 - 30
+
+
+def test_opened_player_can_only_discard_the_drawn_tile():
+    r = Round(0, random.Random(30))
+    set_after_draw(r, [[18] * 13 + [1], [13] * 13, [14] * 13], turn=0)
+    r.opened[0] = True
+    other = next(k for k in range(R.KINDS) if r.hands[0][k] and k != r.draw_kind)
+    with pytest.raises(GameError):
+        r.discard(0, other)
+    r.discard(0, r.draw_kind)                 # 摸到的那张可以打
+    assert r.phase in ("discard", "claim", "over")
+
+
+def test_drawn_tile_is_noted_privately():
+    r = Round(0, random.Random(31))
+    r.wall = [5, 6, 7]
+    r.turn = 1
+    r._draw_for(1)
+    assert r.notes[1][-1] == "摸到：" + R.kind_name(r.draw_kind)
+
+
+def test_steal_notes_both_players_about_their_own_tiles():
+    r = Round(0, random.Random(32), items([{}, {}, {"steal": 1}]))
+    set_after_draw(r, [[18] * 13, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], [20] * 13 + [27]], turn=2)
+    r.use_item(2, "steal", kind=27, opp=1)
+    assert any("釜底抽薪" in t and "给出" in t for t in r.notes[2])
+    assert any("釜底抽薪" in t and "失去" in t for t in r.notes[1])
+    assert not any("釜底抽薪" in t for t in r.notes[0])
