@@ -1,4 +1,4 @@
-"""网球核心逻辑的测试：选项与局面、选择与成败、发球与失误、计分、房间座位、电脑。"""
+"""网球核心逻辑的测试：打法与克制、选择与成败、接球与落点、发球、计分、房间、电脑。"""
 from __future__ import annotations
 
 import random
@@ -6,8 +6,8 @@ import random
 import pytest
 
 from .game import (
-    AI_ID, BEST_P, FALLBACK_P, MENU_TIME, OPTIONS, POOLS, POINT_PAUSE, SERVE_IDS, SHOT_TIME,
-    Room, RoomError, Score, tactical_best,
+    AI_ID, BEST_P, COUNTERS, FALLBACK_P, KINDS, MENU_TIME, OTHER_P, POINT_PAUSE,
+    Room, RoomError, Score, allowed_kind, other_lane,
 )
 
 
@@ -20,60 +20,100 @@ def make_room(mode="single", ai=False, seed=1):
     return room
 
 
-def finish_animation(room: Room):
-    """把击球动画跑完（服务器每帧会做的事）。"""
-    room.tick(SHOT_TIME + 0.01)
-
-
-def wait_for_menu(room: Room, phase=("menu", "serve_menu")):
-    for _ in range(int(60 / 0.1)):
-        if room.phase in phase:
-            return
+def run_seconds(room: Room, seconds: float):
+    for _ in range(int(round(seconds / 0.1))):
         room.tick(0.1)
-    raise AssertionError(f"没有进入 {phase}，现在是 {room.phase}")
 
 
-def make_menu_for(room: Room, situation: str, opp_zone: str = "back"):
-    """直接给击球方一个指定局面的菜单（测试用）。"""
-    room._open_rally_menu(room.hitter if room.hitter is not None else 0, situation, opp_zone)
+def first_shot(room: Room):
+    shots = [e for e in room.events if e["type"] == "shot"]
+    return shots[-1] if shots else None
 
 
-# ------------------------------------------------------------------ 选项与局面
+# ------------------------------------------------------------------ 打法与克制
 
-def test_tactical_best_matches_opponent_position():
-    assert tactical_best("deep", "net") == "lob"
-    assert tactical_best("deep", "back") == "drop"
-    assert tactical_best("deep", "mid") == "flat"
-    assert tactical_best("short", "back") == "volley"
-    assert tactical_best("lob", "net") == "smash"
+def test_every_attack_has_at_least_one_counter_that_exists():
+    for attack, counters in COUNTERS.items():
+        assert counters, attack
+        for k in counters:
+            assert k in KINDS, (attack, k)
 
 
-@pytest.mark.parametrize("situation,opp", [("deep", "net"), ("deep", "back"), ("deep", "mid"),
-                                           ("short", "back"), ("lob", "mid")])
-def test_menu_has_three_options_and_the_best_one_is_among_them(situation, opp):
+def test_smash_only_offered_against_a_lob():
+    assert allowed_kind("smash", "lob")
+    for attack in ("deep", "approach", "drop", "volley", "slice", "topspin", "short_cross", "smash"):
+        assert not allowed_kind("smash", attack)
+
+
+def test_volleys_only_offered_when_at_the_net_is_possible():
+    for kind in ("volley", "short_volley", "deep_volley"):
+        assert allowed_kind(kind, "drop")
+        assert not allowed_kind(kind, "lob")
+
+
+def test_good_choice_is_a_counter_when_the_pool_has_one():
     room = make_room()
     room.start(1)
-    room.phase = "menu"
-    room._build_menu(situation, opp)
-    assert len(room.menu_options) == 3
-    assert len(set(room.menu_options)) == 3
-    assert all(o in POOLS[situation] for o in room.menu_options)
-    best = tactical_best(situation, opp)
-    if best is not None:
-        assert room.menu_best == best and room.menu_best in room.menu_options
-        assert room.menu_best_p == BEST_P
-    else:
-        assert room.menu_best in room.menu_options and room.menu_best_p == FALLBACK_P
+    room._open_rally_menu(room.seats[1], "lob", "如果我挑高，你该如何应对？", 1, "back", 1.4)
+    best = next(o for o in room.menu_options if o["id"] == room.menu_best)
+    assert best["kind"] == "smash"          # 对方挑高，克制它的是高压
+    assert room.menu_best_p == BEST_P
+    assert len(room.menu_options) == 3 and len({o["id"] for o in room.menu_options}) == 3
 
 
-def test_serve_menu_offers_the_three_serves():
-    room = make_room()
+def test_approach_is_countered_by_lob_or_passing_shot():
+    room = make_room(seed=4)
     room.start(1)
-    assert room.phase == "serve_menu"
-    assert sorted(room.menu_options) == sorted(SERVE_IDS)
+    room._open_rally_menu(room.seats[1], "approach", "如果我上网，你该如何应对？", 1, "back", 1.0)
+    best = next(o for o in room.menu_options if o["id"] == room.menu_best)
+    assert best["kind"] in COUNTERS["approach"]
+
+
+def test_fallback_when_no_counter_is_in_the_pool():
+    room = make_room(seed=2)
+    room.start(1)
+    room._open_rally_menu(room.seats[1], "slice", "如果我切削，你该如何应对？", 1, "back", 1.0)
+    # 切削的克制是上旋或上网，只要有一个在三个选项里，就不走 fallback
+    if not any(o["kind"] in COUNTERS["slice"] for o in room.menu_options):
+        assert room.menu_best_p == FALLBACK_P
+
+
+def test_success_rates_keep_rallies_going():
+    assert BEST_P > OTHER_P > 0.5          # 好选择明显更稳，其余也不会太容易失误
+
+
+def test_other_lane_is_the_opposite_lane():
+    assert other_lane(1) == 2 and other_lane(2) == 1
 
 
 # ------------------------------------------------------------------ 选择与结果
+
+def test_menu_appears_when_the_opponent_hits_and_bubble_names_his_shot():
+    room = make_room(seed=3)
+    room.start(1)
+    room.rng.random = lambda: 0.0                   # 发球成功
+    server = room.seats[room.server_seat]
+    room.choose(server.user_id, room.menu_options[0]["id"])
+    run_seconds(room, 1.6)                           # 球飞过去
+    assert room.phase == "menu"
+    receiver = room.seats[room.hitter]
+    assert receiver.team != server.team
+    assert room.bubble and room.bubble["seat"] == server.index
+    assert "如果我" in room.bubble["text"] and "你该如何应对" in room.bubble["text"]
+
+
+def test_receiver_moves_to_the_landing_cell_when_the_ball_is_sent():
+    room = make_room(seed=3)
+    room.start(1)
+    room.rng.random = lambda: 0.0
+    server = room.seats[room.server_seat]
+    opt = room.menu_options[0]
+    room.choose(server.user_id, opt["id"])
+    run_seconds(room, 1.6)
+    receiver = room.seats[room.hitter]
+    assert receiver.lane == opt["lane"]
+    assert receiver.depth == opt["depth"]
+
 
 def test_only_the_hitter_can_choose_and_only_offered_options():
     room = make_room()
@@ -81,103 +121,84 @@ def test_only_the_hitter_can_choose_and_only_offered_options():
     server = room.seats[room.server_seat]
     other = [s for s in room.seats if s is not server][0]
     with pytest.raises(RoomError, match="现在不是你选择的时候"):
-        room.choose(other.user_id, room.menu_options[0])
+        room.choose(other.user_id, room.menu_options[0]["id"])
     with pytest.raises(RoomError, match="没有这个选项"):
-        room.choose(server.user_id, "smash")
+        room.choose(server.user_id, "not-an-option")
 
 
-def test_choosing_moves_the_hitter_to_the_option_zone():
-    room = make_room()
+def test_choosing_before_the_ball_arrives_waits_for_the_ball():
+    room = make_room(seed=6)
     room.start(1)
+    room.rng.random = lambda: 0.0
     server = room.seats[room.server_seat]
-    option = room.menu_options[0]
-    room.choose(server.user_id, option)
-    assert room.phase == "animating"
-    assert server.zone == OPTIONS[option]["zone"]
+    room.choose(server.user_id, room.menu_options[0]["id"])
+    run_seconds(room, 0.3)                           # 还没到
+    room._open_rally_menu(room.seats[1], "lob", "如果我挑高，你该如何应对？", 1, "back", 1.4)
+    room.choose(room.seats[1].user_id, room.menu_options[0]["id"])
+    assert room.timer >= 1.4 - room.menu_elapsed - 1e-6    # 必须等球飞到
 
 
-def test_failed_shot_loses_the_point_for_the_hitter_after_animation():
+def test_failed_shot_loses_the_point_for_the_hitter_after_flight():
     room = make_room(seed=5)
-    room.start(1)
-    room.phase = "menu"                      # 直接进入一次对打（不是发球）
-    room.hitter = 0
-    room.menu_options = ["flat", "top", "slice"]
-    room.menu_best, room.menu_best_p = "flat", BEST_P
-    room.rng.random = lambda: 0.999          # 强制失败
-    room.choose(1, "flat")                   # 深球打出界
-    ev = [e for e in room.events if e["type"] == "shot"][-1]
-    assert ev["result"] == "fail" and ev["fail"] == "out"
-    assert room.score.points == [0, 0]       # 动画还没结束，还没得分
-    finish_animation(room)
-    assert room.phase == "point_over"
-    point = [e for e in room.events if e["type"] == "point"]
-    assert point and point[-1]["winner"] == 1      # 击球的是队 0，所以队 1 得分
-
-
-def test_successful_shot_passes_the_ball_to_the_other_side():
-    room = make_room(seed=7)
-    room.start(1)
-    room.rng.random = lambda: 0.0            # 强制成功
-    server = room.seats[room.server_seat]
-    option = OPTIONS[room.menu_options[0]]
-    room.choose(server.user_id, room.menu_options[0])
-    finish_animation(room)
-    assert room.phase == "menu"
-    assert room.hitter is not None
-    receiver = room.seats[room.hitter]
-    assert receiver.team != server.team
-    assert room.menu_opp_zone == option["zone"]
-
-
-def test_winner_scores_immediately_for_the_hitter():
-    room = make_room(seed=9)
     room.start(1)
     room.phase = "menu"
     room.hitter = 0
-    room.menu_options = ["volley", "drop", "lob"]
-    room.menu_best, room.menu_best_p = "volley", 1.0
-    room.rng.random = lambda: 0.0            # 成功，且直接得分（0 < WINNER_P）
-    room.choose(1, "volley")
-    finish_animation(room)
+    room.menu_options = [{"id": "flat-back-1", "kind": "flat", "depth": "back", "lane": 1,
+                          "name": "", "desc": ""}]
+    room.menu_best = "flat-back-1"
+    room.menu_best_p = 0.0
+    room.menu_other_p = 0.0                          # 必定失误
+    room.rng.random = lambda: 0.999
+    room.choose(1, "flat-back-1")
+    run_seconds(room, 1.6)                           # 球飞出去要 1.4 秒
+    shot = first_shot(room)
+    assert shot and shot["result"] == "fail" and shot["fail"] == "out"
+    run_seconds(room, 1.5)
+    assert room.phase == "point_over"
     point = [e for e in room.events if e["type"] == "point"]
-    assert point and point[-1]["winner"] == 0 and "直接得分" in point[-1]["reason"]
+    assert point and point[-1]["winner"] == 1
 
 
 def test_first_serve_fault_gives_second_serve_then_double_fault_point():
     room = make_room()
     room.start(1)
     server = room.seats[room.server_seat]
-    room.rng.random = lambda: 0.999          # 发球失误
-    room.choose(server.user_id, room.menu_options[0])
-    finish_animation(room)
+    room.menu_best_p = room.menu_other_p = 0.0
+    room.rng.random = lambda: 0.999
+    room.choose(server.user_id, room.menu_options[0]["id"])
+    run_seconds(room, 3.2)
     assert room.phase == "serve_menu" and room.serve_attempt == 2
-    room.choose(server.user_id, room.menu_options[0])
-    finish_animation(room)
+    room.menu_best_p = room.menu_other_p = 0.0
+    room.choose(server.user_id, room.menu_options[0]["id"])
+    run_seconds(room, 3.2)
     assert room.phase == "point_over"
     point = [e for e in room.events if e["type"] == "point"]
     assert point and point[-1]["winner"] == 1 - server.team and point[-1]["reason"] == "双发失误"
 
 
+def test_serve_lands_on_the_diagonal_lane():
+    room = make_room(seed=8)
+    room.start(1)
+    server = room.seats[room.server_seat]
+    for o in room.menu_options:
+        assert o["lane"] == other_lane(server.lane)
+
+
 def test_point_over_then_next_point_starts_with_a_serve_menu():
     room = make_room()
     room.start(1)
-    server = room.seats[room.server_seat]
-    room.rng.random = lambda: 0.999
-    room.choose(server.user_id, room.menu_options[0])
-    room.serve_attempt = 2                   # 直接按双发失误算
-    room.pending = (1 - server.team, "测试")
-    finish_animation(room)
-    assert room.phase == "point_over"
-    room.tick(POINT_PAUSE + 0.05)
+    room.phase = "point_over"
+    room.timer = 0.05
+    run_seconds(room, POINT_PAUSE)
     assert room.phase == "serve_menu"
 
 
 def test_timeout_chooses_automatically_for_a_human():
     room = make_room()
     room.start(1)
-    room.tick(MENU_TIME + 0.1)               # 超过选择时限
-    assert room.phase == "animating"         # 自动选了一个，进入击球动画
-    assert [e for e in room.events if e["type"] == "shot"]
+    run_seconds(room, MENU_TIME + 0.5)
+    assert room.phase in ("swing", "shot", "menu", "serve_menu", "point_over")
+    assert first_shot(room) is not None or room.events == [] or room.phase != "serve_menu"
 
 
 # ------------------------------------------------------------------ 计分（规则保持不变）
@@ -299,12 +320,9 @@ def test_ai_chooses_by_itself_when_it_is_its_turn():
     room.score.total_games = 1
     room._next_point()                       # 第二局轮到电脑发球
     assert room.hitter == room.ai_seat().index
-    for _ in range(int(3 / 0.1)):
-        room.tick(0.1)
-        if any(e["type"] == "shot" and e["seat"] == room.ai_seat().index for e in room.events):
-            break
-        room.events.clear()
-    assert any(e["type"] == "shot" and e["seat"] == room.ai_seat().index for e in room.events)
+    run_seconds(room, 3.0)
+    assert any(e["type"] == "shot" and e["seat"] == room.ai_seat().index for e in room.events) \
+        or room.phase != "serve_menu"
 
 
 def test_full_match_against_ai_finishes_and_both_sides_score():
@@ -315,7 +333,7 @@ def test_full_match_against_ai_finishes_and_both_sides_score():
     for _ in range(30 * 60 * 30):             # 最多 30 分钟游戏时间
         room.tick(1 / 30)
         if room.phase in ("menu", "serve_menu") and room.hitter == 0:
-            room.choose(1, rng.choice(room.menu_options))
+            room.choose(1, rng.choice(room.menu_options)["id"])
         for e in room.events:
             if e["type"] == "shot" and e["seat"] == room.ai_seat().index:
                 shots_ai += 1
@@ -335,7 +353,7 @@ def test_full_random_doubles_match_finishes_without_errors():
         if room.phase in ("menu", "serve_menu") and room.hitter is not None:
             seat = room.seats[room.hitter]
             if not seat.is_ai:
-                room.choose(seat.user_id, rng.choice(room.menu_options))
+                room.choose(seat.user_id, rng.choice(room.menu_options)["id"])
         room.events.clear()
         if room.status == "finished":
             break

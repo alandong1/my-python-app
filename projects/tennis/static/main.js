@@ -184,14 +184,9 @@ function renderRoom(state) {
 
 // ------------------------------------------------------------ 三维场景（抽象的小人，抬高的视角）
 
-const ZONE_X = { back: 10.6, mid: 7.0, net: 2.6 };   // 站位对应的 x 坐标（队 1 的一侧）
-const ZONE_TEXT = { back: '后场', mid: '中场', net: '网前' };
-const SITUATION_TEXT = {
-  serve: '轮到你发球',
-  deep: '球落在你的后场',
-  short: '对方打来短球',
-  lob: '对方挑高过来',
-};
+const DEPTH_X = { back: 10.6, mid: 7.0, front: 3.4 };   // 站位对应的距离（队 0 在 x<0 一侧）
+const LANE_Z = { 1: -2.3, 2: 2.3 };                       // 一区、二区对应的左右位置
+const ARC_HEIGHT = { low: 0.3, normal: 1.0, high: 3.4 };  // 球飞行的弧线高度
 const TEAM_COLOR = [0xe4572e, 0x2e86de];
 
 const scene = new THREE.Scene();
@@ -235,6 +230,9 @@ addBox(23.77, 0.01, LT, 0, 0.005, 4.115, WHITE);
 addBox(LT, 0.01, 8.23, -6.4, 0.005, 0, WHITE);
 addBox(LT, 0.01, 8.23, 6.4, 0.005, 0, WHITE);
 addBox(12.8, 0.01, LT, 0, 0.005, 0, WHITE);
+// 一区、二区、前中后场的分界线（淡色，方便看位置）
+const zoneLine = new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.25 });
+for (const x of [-DEPTH_X.mid, DEPTH_X.mid]) addBox(0.04, 0.012, 10.97, x, 0.006, 0, zoneLine);
 // 看台（抽象的几块灰色）
 const stand = mat(0x8a8f99);
 for (const side of [-1, 1]) {
@@ -252,7 +250,7 @@ scene.add(netMesh);
 addBox(0.04, 0.06, 12.8, 0, 0.914, 0, WHITE);
 
 // 球：画得大一点，抬高视角后也能看清
-const ball = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), mat(0xd4ff3a, { emissive: 0x335500 }));
+const ball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), mat(0xd4ff3a, { emissive: 0x335500 }));
 scene.add(ball);
 const ballShadow = new THREE.Mesh(
   new THREE.CircleGeometry(0.28, 18),
@@ -271,10 +269,28 @@ function nameSprite(text) {
   g.fillText(text.slice(0, 8), 128, 34);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
   sp.scale.set(2.2, 0.55, 1);
-  sp.position.y = 2.25;
+  sp.position.y = 2.1;
   return sp;
 }
-const figures = new Map();   // 座位号 -> {group, arm, x, z, tx, tz, team, swingT}
+// 对方头顶的气泡：「如果我……，你该如何应对？」
+function bubbleSprite(text) {
+  const c = document.createElement('canvas');
+  c.width = 640; c.height = 150;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(255,255,255,0.95)';
+  g.beginPath(); g.roundRect(6, 6, 628, 110, 18); g.fill();
+  g.beginPath(); g.moveTo(300, 116); g.lineTo(320, 146); g.lineTo(340, 116); g.fill();
+  g.fillStyle = '#1d2733'; g.font = 'bold 40px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 320, 61);
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+  sp.scale.set(7.0, 1.64, 1);
+  sp.position.y = 3.1;
+  sp.userData.text = text;
+  return sp;
+}
+
+const figures = new Map();   // 座位号 -> {group, arm, x, z, tx, tz, team, anim, bubble}
 
 function makeFigure(seat) {
   const group = new THREE.Group();
@@ -294,14 +310,14 @@ function makeFigure(seat) {
   arm.add(limb, racket);
   group.add(body, head, arm, nameSprite(seat.name));
   scene.add(group);
-  return { group, arm, x: 0, z: seat.z, tx: 0, tz: seat.z, team: seat.team, swingT: -1 };
+  return { group, arm, x: 0, z: 0, tx: 0, tz: 0, team: seat.team, anim: null, bubble: null, userId: seat.userId };
 }
 
-function zoneX(team, zone) {
-  return (team === 0 ? -1 : 1) * ZONE_X[zone];
-}
+// 站位（前中后场 × 一区二区）换算成世界坐标
+function cellX(team, depth) { return (team === 0 ? -1 : 1) * DEPTH_X[depth]; }
+function cellZ(lane) { return LANE_Z[lane]; }
 
-// 把服务器的站位同步到场景里（小人会平滑地走到新位置）
+// 把服务器的站位和气泡同步到场景里（小人会平滑地走到新位置）
 function applyState(state) {
   for (const s of state.seats) {
     if (!s) continue;
@@ -309,37 +325,62 @@ function applyState(state) {
     if (!f || f.userId !== s.userId) {
       if (f) scene.remove(f.group);
       f = makeFigure(s);
-      f.userId = s.userId;
       figures.set(s.index, f);
-      f.x = f.tx = zoneX(s.team, s.zone);
+      f.x = f.tx = cellX(s.team, s.depth);
+      f.z = f.tz = cellZ(s.lane);
     }
-    f.tx = zoneX(s.team, s.zone);
-    f.tz = s.z;
+    f.tx = cellX(s.team, s.depth);
+    f.tz = cellZ(s.lane);
   }
   for (const [idx, f] of figures) {
     if (!state.seats[idx]) { scene.remove(f.group); figures.delete(idx); }
   }
+  // 气泡：只在对方击球之后、他的那一拍结束之前显示
+  for (const f of figures.values()) {
+    const b = state.bubble && figures.get(state.bubble.seat) === f ? state.bubble.text : null;
+    if (b && f.bubble?.userData.text !== b) {
+      if (f.bubble) f.group.remove(f.bubble);
+      f.bubble = bubbleSprite(b);
+      f.group.add(f.bubble);
+    } else if (!b && f.bubble) {
+      f.group.remove(f.bubble);
+      f.bubble = null;
+    }
+  }
   for (const ev of state.events) {
-    if (ev.type === 'shot') startShotAnimation(ev);
+    if (ev.type === 'shot') startShot(ev);
   }
 }
 
-// 击球动画：球从击球的小人身上沿弧线飞向落点
-let shotAnim = null;   // {t, dur, from, to, arc, seat, result}
-function startShotAnimation(ev) {
+// 击球动画：小人挥拍的动作和球的飞行，都和选择的打法、落点一致
+let shotBall = null;   // {t, dur, from, to, arc}
+let landing = null;    // 球最后停的位置（等对方接球时悬在这里）
+const armPoseAt = {
+  lob: (u) => [lerp(0.2, -2.8, u), 0, 0],
+  smash: (u) => [lerp(-2.9, 0.9, u), 0, 0],
+  volley: (u) => [lerp(-0.9, -0.3, u), 0, 0],
+  drop: (u) => [lerp(-0.1, 0.8, u), 0, 0],
+  slice: (u) => [lerp(-1.8, 0.6, u), 0, -0.6],
+  serve: (u) => [lerp(-3.0, 0.5, u), 0, 0],
+  fore: (u) => [-0.3, lerp(-1.4, 1.4, u), 0],
+};
+function lerp(a, b, u) { return a + (b - a) * u; }
+
+function startShot(ev) {
   const f = figures.get(ev.seat);
   if (!f) return;
-  f.swingT = 0;
-  const from = new THREE.Vector3(f.x, 1.2, f.tz);
+  f.anim = { t: 0, dur: 0.6, kind: ev.anim || 'fore' };
+  const from = new THREE.Vector3(f.x, 1.2, f.z);
   let to;
-  if (ev.toZone === 'far') {
-    to = new THREE.Vector3((ev.toTeam === 0 ? -1 : 1) * 15, 0.2, f.tz * 1.6);
-  } else if (ev.toZone === 'net') {
-    to = new THREE.Vector3(0, 0.3, f.tz);
+  if (ev.toZone === 'court') {
+    to = new THREE.Vector3(cellX(ev.toTeam, ev.toDepth), 0.15, cellZ(ev.toLane));
+  } else if (ev.toZone === 'far') {
+    to = new THREE.Vector3((ev.toTeam === 0 ? -1 : 1) * 16, 0.15, f.z * 1.3);
   } else {
-    to = new THREE.Vector3(zoneX(ev.toTeam, ev.toZone), 0.2, (Math.random() - 0.5) * 3);
+    to = new THREE.Vector3(0, 0.5, f.z);            // 下网
   }
-  shotAnim = { t: 0, dur: 1.3, from, to, arc: ev.arc ? 3.4 : 1.0, result: ev.result, fail: ev.fail };
+  shotBall = { t: 0, dur: ev.flight || 1.0, from, to, arc: ARC_HEIGHT[ev.arc] ?? ARC_HEIGHT.normal, result: ev.result };
+  landing = to.clone();
 }
 
 const camLook = new THREE.Vector3(0, 0.6, 0);
@@ -353,38 +394,42 @@ function frame(now) {
   const state = S.state;
   if (!state || S.view !== 'game') return;
 
-  // 小人平滑移动并挥拍
+  // 小人平滑走到站位，并做击球动作
   const k = 1 - Math.pow(0.001, dt);
   for (const f of figures.values()) {
     f.x += (f.tx - f.x) * k;
     f.z += (f.tz - f.z) * k;
     f.group.position.set(f.x, 0, f.z);
-    if (f.swingT >= 0) {
-      f.swingT += dt / 0.45;
-      const a = Math.sin(Math.min(1, f.swingT) * Math.PI);
-      f.arm.rotation.z = -a * 1.6;
-      if (f.swingT >= 1) { f.swingT = -1; f.arm.rotation.z = 0; }
+    if (f.anim) {
+      f.anim.t += dt;
+      const u = Math.min(1, f.anim.t / f.anim.dur);
+      const pose = (armPoseAt[f.anim.kind] || armPoseAt.fore)(u);
+      f.arm.rotation.set(pose[0], pose[1], pose[2]);
+      if (u >= 1) { f.anim = null; f.arm.rotation.set(0, 0, 0); }
     }
+    if (f.bubble) f.bubble.lookAt?.(camera.position);
   }
 
-  // 球：击球动画中沿弧线飞；平时停在击球方身前；得分后隐藏
-  if (shotAnim) {
-    shotAnim.t += dt;
-    const u = Math.min(1, shotAnim.t / shotAnim.dur);
-    ball.position.lerpVectors(shotAnim.from, shotAnim.to, u);
-    ball.position.y += Math.sin(Math.PI * u) * shotAnim.arc;
+  // 球：飞行中沿弧线；飞完悬在落点；得分后隐藏
+  if (shotBall) {
+    shotBall.t += dt;
+    const u = Math.min(1, shotBall.t / shotBall.dur);
+    ball.position.lerpVectors(shotBall.from, shotBall.to, u);
+    ball.position.y += Math.sin(Math.PI * u) * shotBall.arc;
     ball.visible = true;
-    if (u >= 1) shotAnim = null;
-  } else {
-    const hitter = state.hitter != null ? figures.get(state.hitter) : null;
-    if (hitter && (state.phase === 'menu' || state.phase === 'serve_menu')) {
-      ball.position.set(hitter.x + (hitter.team === 0 ? 0.8 : -0.8), 1.4 + Math.sin(now / 300) * 0.1, hitter.tz);
+    if (u >= 1) shotBall = null;
+  } else if (landing && (state.phase === 'menu' || state.phase === 'swing' || state.phase === 'shot')) {
+    ball.position.copy(landing);
+    ball.position.y = 0.15 + Math.sin(now / 300) * 0.02;
+    ball.visible = true;
+  } else if (state.phase === 'serve_menu') {
+    const server = figures.get(state.serveSeat);
+    if (server) {
+      ball.position.set(server.x, 1.4, server.z);
       ball.visible = true;
-    } else if (state.phase === 'animating') {
-      ball.visible = true;
-    } else {
-      ball.visible = false;
     }
+  } else {
+    ball.visible = false;
   }
   ballShadow.position.set(ball.position.x, 0.005, ball.position.z);
   const hgt = Math.max(0.35, 1 - ball.position.y * 0.1);
@@ -426,8 +471,8 @@ function renderScore(state) {
   $('scoreBoard').innerHTML = `我方 ${head} · ${games} · ${points}${sets ? `<br><span style="opacity:.75">已完成：${sets}</span>` : ''}`;
 }
 
-// 当前这一次选择：是不是轮到我、局面是什么、对方站在哪里
-let choiceKey = null;   // 已经发送过选择的那一次（防止重复点击）
+// 当前这一次选择（防止同一次重复点击）
+let choiceKey = null;
 
 function renderMenu(state) {
   const box = $('menu');
@@ -439,20 +484,19 @@ function renderMenu(state) {
   }
   box.hidden = false;
   const myTurn = mine && state.hitter === mine.index;
-  const key = `${state.phase}-${state.hitter}-${menu.options.map((o) => o.id).join(',')}`;
-  const oppZone = menu.oppZone ? `对方站在${ZONE_TEXT[menu.oppZone]}` : '';
+  const serve = menu.attack === 'serve';
+  const bubbleText = state.bubble ? state.bubble.text : '';
   if (!myTurn) {
-    $('menuTitle').textContent = '对方在选择…';
-    $('menuSub').textContent = [SITUATION_TEXT[menu.situation], oppZone].filter(Boolean).join(' · ');
+    $('menuTitle').textContent = serve ? '对方发球中…' : '对方在选择…';
+    $('menuSub').textContent = bubbleText;
     $('menuCards').replaceChildren();
     $('menuTimer').textContent = '';
     return;
   }
-  $('menuTitle').textContent = menu.situation === 'serve' ? '轮到你发球，选一种发球' : '轮到你，选一种打法';
-  $('menuSub').textContent = menu.situation === 'serve'
-    ? oppZone
-    : [SITUATION_TEXT[menu.situation], oppZone].filter(Boolean).join(' · ');
+  $('menuTitle').textContent = serve ? '轮到你发球，选一种发球和落点' : '轮到你，选一种应对';
+  $('menuSub').textContent = serve ? '发球要落在对角的发球区' : bubbleText;
   $('menuTimer').textContent = `${Math.ceil(menu.deadline)} 秒内选择`;
+  const key = `${state.phase}-${state.hitter}-${menu.options.map((o) => o.id).join(',')}`;
   if (key === choiceKey) return;   // 已经选过了，等服务器的动画
   const cards = menu.options.map((o, i) => el('button', {
     class: 'choice',
@@ -500,7 +544,7 @@ function showShotLog(ev) {
   $('shotLog').textContent = `${who}：${ev.name}${res}`;
 }
 
-// ------------------------------------------------------------ 键盘
+// ------------------------------------------------------------ 键盘与按钮
 
 window.addEventListener('keydown', (e) => {
   if (S.view !== 'game' || e.repeat) return;
