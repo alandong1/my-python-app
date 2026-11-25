@@ -37,6 +37,11 @@ rooms: Dict[str, Room] = {}   # 房间号 -> 房间（只在内存里，服务�
 router = APIRouter()
 
 
+async def startup() -> None:
+    """服务器启动时：给所有已有账号发一次起始积分（只发一次）。"""
+    await run_in_threadpool(store.grant_once)
+
+
 @router.get("/")
 async def index():
     return html_page(STATIC / "index.html")

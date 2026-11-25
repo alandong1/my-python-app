@@ -1,4 +1,4 @@
-"""道具：偷天换日、锦上添花、妙手回春（摸牌前使用），以及积分和库存的数据库操作。"""
+"""技能：摸完牌之后使用，每局每个只能用一次；偷天换日、锦上添花、妙手回春、釜底抽薪；积分和库存。"""
 import random
 import secrets
 
@@ -13,114 +13,142 @@ def items(stock):
     return {"enabled": True, "stock": stock}
 
 
-def set_hands(r, hands):
+def set_after_draw(r, hands, turn=0):
+    """把每家的手牌换成指定的牌，并让 turn 这家处于「摸完牌、准备打牌」的状态。"""
     for s in range(3):
         r.hands[s] = R.counts_of(hands[s])
         r.melds[s] = []
         r.discards[s] = []
+    r.turn = turn
+    r.phase = "discard"
+    r.drawn = True
+    r.draw_kind = R.expand(r.hands[turn])[-1]
     r.pending = {}
     r.responses = {}
     r.last = None
 
 
-def test_predraw_stops_before_drawing_when_items_are_owned():
+def total_tiles(r):
+    n = sum(sum(h) for h in r.hands) + len(r.wall) + sum(len(d) for d in r.discards)
+    for seat in r.melds:
+        for m in seat:
+            n += 3 if m["type"] == "pong" else 4
+    return n
+
+
+def test_items_are_offered_only_after_drawing():
     r = Round(0, random.Random(1), items([{"swap": 1}, {}, {}]))
-    assert r.phase == "predraw" and r.turn == 0
-    assert len(r.hands[0]) and sum(r.hands[0]) == 13
-    actions = [o["action"] for o in r.predraw_options(0)]
-    assert actions == ["skip", "item"]
-    r.act_predraw(0, "skip")
-    assert r.phase == "discard" and r.drawn is True and sum(r.hands[0]) == 14
+    r.drawn = False                                    # 还没有摸牌
+    assert r.item_options(0) == []
+    r.drawn = True
+    r.phase = "discard"
+    assert [o["item"] for o in r.item_options(0)] == ["swap"]
 
 
-def test_no_predraw_when_items_disabled():
-    r = Round(0, random.Random(2))
-    assert r.phase == "discard" and r.drawn is True
+def test_no_items_when_disabled_or_opened():
+    r = Round(0, random.Random(2), None)
+    r.drawn = True
+    assert r.item_options(0) == []
+    r2 = Round(0, random.Random(3), items([{"swap": 1}, {}, {}]))
+    r2.drawn = True
+    r2.opened[0] = True
+    assert r2.item_options(0) == []                    # 明牌之后不能用技能
 
 
-def test_swap_exchanges_a_hand_tile_with_a_random_wall_tile():
-    r = Round(0, random.Random(3), items([{"swap": 1}, {}, {}]))
+def test_swap_exchanges_a_hand_tile_with_a_random_wall_tile_and_is_used_once():
+    r = Round(0, random.Random(3), items([{"swap": 2}, {}, {}]))
+    r.drawn = True
+    r.phase = "discard"
     give = R.expand(r.hands[0])[0]
-    before = sum(sum(h) for h in r.hands) + len(r.wall)
-    wall_before = len(r.wall)
-    r.act_predraw(0, "item", item="swap", kind=give)
-    assert r.stock[0]["swap"] == 0
-    assert sum(sum(h) for h in r.hands) + len(r.wall) == before   # 牌数守恒
-    assert len(r.wall) == wall_before - 1                           # 换完之后照常摸了一张
-    assert sum(r.hands[0]) == 14 and r.phase == "discard" and r.drawn is True
+    before = total_tiles(r)
+    r.use_item(0, "swap", kind=give)
+    assert total_tiles(r) == before                    # 牌数守恒
+    assert r.stock[0]["swap"] == 1 and "swap" in r.used[0]
+    assert r.drawn is True and r.turn == 0             # 还要打牌
+    assert all(o["item"] != "swap" for o in r.item_options(0))   # 每局只能用一次
+    with pytest.raises(GameError):
+        r.use_item(0, "swap", kind=R.expand(r.hands[0])[0])
 
 
 def test_swap_needs_a_tile_you_hold():
     r = Round(0, random.Random(4), items([{"swap": 1}, {}, {}]))
+    r.drawn = True
+    r.phase = "discard"
     missing = next(k for k in range(R.KINDS) if r.hands[0][k] == 0)
     with pytest.raises(GameError):
-        r.act_predraw(0, "item", item="swap", kind=missing)
-    assert r.phase == "predraw" and r.stock[0]["swap"] == 1
+        r.use_item(0, "swap", kind=missing)
+    assert r.stock[0]["swap"] == 1
 
 
-def test_lucky_pong_takes_a_discard_that_makes_a_triplet():
+def test_lucky_pong_takes_a_discard_you_hold_a_pair_of():
     r = Round(0, random.Random(5), items([{}, {"lucky_pong": 1}, {}]))
-    set_hands(r, [[18] * 13, [0, 0] + [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14], [20] * 13])
+    set_after_draw(r, [[18] * 13 + [1], [0, 0] + [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14], [20] * 13], turn=1)
     r.discards[0] = [0]
-    r.turn = 1
-    r.phase = "predraw"
-    r.act_predraw(1, "item", item="lucky_pong", kind=0, src=0)
+    r.use_item(1, "lucky_pong", kind=0, src=0)
     assert r.melds[1] == [{"type": "pong", "kind": 0, "from": 0}]
     assert r.discards[0] == []
     assert r.phase == "discard" and r.turn == 1 and r.drawn is False   # 碰之后直接打牌
 
 
-def test_lucky_pong_cannot_pick_a_tile_without_a_pair():
+def test_lucky_pong_needs_a_pair_in_hand():
     r = Round(0, random.Random(6), items([{}, {"lucky_pong": 1}, {}]))
-    set_hands(r, [[18] * 13, [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16], [20] * 13])
+    set_after_draw(r, [[18] * 13 + [1], [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16], [20] * 13], turn=1)
     r.discards[0] = [0]
-    r.turn = 1
-    r.phase = "predraw"
     with pytest.raises(GameError):
-        r.act_predraw(1, "item", item="lucky_pong", kind=0, src=0)
+        r.use_item(1, "lucky_pong", kind=0, src=0)
 
 
-def test_miracle_hu_takes_a_discard_and_wins_by_self_draw():
+def test_miracle_hu_needs_tenpai_and_replaces_the_drawn_tile():
     r = Round(0, random.Random(7), items([{}, {}, {"miracle_hu": 1}]))
-    # 屁胡听发：123万 789万 111条 中中中 + 发，缺的那张发打在牌河里
-    set_hands(r, [[18] * 13, [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16],
-                  [0, 1, 2, 6, 7, 8, 9, 9, 9, 27, 27, 27, 28]])
-    r.discards[1] = [28]
-    r.turn = 2
-    r.phase = "predraw"
-    r.act_predraw(2, "item", item="miracle_hu", kind=28, src=1)
-    res = r.result
-    assert res["type"] == "win" and res["winners"][0]["selfDraw"] is True
-    assert res["winners"][0]["points"] == 2                 # 屁胡 + 自摸
-    assert sum(res["deltas"]) == 0
+    # 听发的屁胡：123万 789万 111条 中中中 + 发，摸到一张不要的 6 筒（18 之外的散牌）
+    hand = [0, 1, 2, 6, 7, 8, 9, 9, 9, 27, 27, 27, 28, 25]
+    set_after_draw(r, [[18] * 13, [13] * 13, hand], turn=2)
+    r.draw_kind = 25
+    assert "miracle_hu" in [o["item"] for o in r.item_options(2)]
+    r.discards[1] = [28]                               # 别人打出了发
+    r.use_item(2, "miracle_hu", kind=28, src=1)
+    assert r.discards[2] == [25]                       # 摸到的那张打出去
+    assert r.hands[2][28] == 2 and r.hands[2][25] == 0
+    assert r.discards[1] == []
 
 
-def test_miracle_hu_refused_when_it_does_not_win():
+def test_miracle_hu_not_available_when_not_tenpai():
     r = Round(0, random.Random(8), items([{}, {}, {"miracle_hu": 1}]))
-    set_hands(r, [[18] * 13, [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16],
-                  [0, 1, 2, 6, 7, 8, 9, 9, 9, 27, 27, 27, 28]])
-    r.discards[1] = [13]
-    r.turn = 2
-    r.phase = "predraw"
+    far = [18, 20, 22, 24, 26, 19, 21, 23, 25, 27, 28, 29, 1, 3]
+    set_after_draw(r, [[18] * 13, [13] * 13, far], turn=2)
+    assert all(o["item"] != "miracle_hu" for o in r.item_options(2))
+
+
+def test_steal_swaps_with_a_concealed_tile_of_an_unopened_opponent():
+    r = Round(0, random.Random(9), items([{}, {}, {"steal": 1}]))
+    set_after_draw(r, [[18] * 13, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], [20] * 13 + [27]], turn=2)
+    before = total_tiles(r)
+    give = 27
+    r.use_item(2, "steal", kind=give, opp=1)
+    assert total_tiles(r) == before
+    assert r.hands[2][27] == 0 and sum(r.hands[2]) == 14
+    assert sum(r.hands[1]) == 13
+
+
+def test_steal_refused_against_opened_opponent():
+    r = Round(0, random.Random(10), items([{}, {}, {"steal": 1}]))
+    set_after_draw(r, [[18] * 13, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], [20] * 13 + [27]], turn=2)
+    r.opened[1] = True
     with pytest.raises(GameError):
-        r.act_predraw(2, "item", item="miracle_hu", kind=13, src=1)
-    assert r.phase == "predraw"
+        r.use_item(2, "steal", kind=27, opp=1)
 
 
-def test_store_points_items_and_shop(client):
-    from app.auth import SESSION_COOKIE  # noqa: F401  (确保认证模块已加载)
+def test_store_new_players_start_with_ten_thousand_and_steal_costs_thirty(client):
     r = client.post("/api/auth/guest", json={"guest_key": secrets.token_urlsafe(32)})
     uid = r.json()["id"]
-    assert store.wallet(uid)["points"] == 0
-    assert store.buy(uid, "swap") is False                    # 积分不够
-    store.add_points(uid, 80)
-    assert store.buy(uid, "swap") is True
-    assert store.buy(uid, "miracle_hu") is True               # 50 分
     w = store.wallet(uid)
-    assert w["points"] == 80 - 20 - 50 and w["items"]["swap"] == 1 and w["items"]["miracle_hu"] == 1
-    assert store.consume(uid, "swap") is True
-    assert store.consume(uid, "swap") is False
-    store.refund(uid, "swap")
-    assert store.wallet(uid)["items"]["swap"] == 1
+    assert w["points"] == store.START_POINTS == 10000
+    assert store.buy(uid, "steal") is True
+    assert store.wallet(uid)["points"] == 10000 - 30
+    assert store.wallet(uid)["items"]["steal"] == 1
+    assert store.consume(uid, "steal") is True
+    assert store.consume(uid, "steal") is False
+    store.refund(uid, "steal")
+    assert store.wallet(uid)["items"]["steal"] == 1
     board = store.leaderboard()
-    assert board[0]["points"] == w["points"] and isinstance(board[0]["name"], str)
+    assert board[0]["points"] >= 10000 - 30

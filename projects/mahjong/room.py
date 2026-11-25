@@ -26,10 +26,13 @@ from .engine import ITEM_NAMES, N_PLAYERS, GameError, Match
 BOT_DELAY = 0.8          # 电脑出牌前停一下，让玩家看清楚刚发生了什么
 DISCARD_TIMEOUT = 60     # 真人出牌的时间（秒），超时由电脑代打
 CLAIM_TIMEOUT = 25       # 真人决定碰、杠、胡的时间（秒），超时自动「过」
-PREDRAW_TIMEOUT = 20     # 真人摸牌前决定用不用道具的时间（秒），超时直接摸牌
 NEXT_ROUND_DELAY = 6     # 一局结束后多久开下一局
 ROUND_CHOICES = (1, 4, 8)
 VISIBILITY = ("public", "private")
+
+
+def _opt_int(v) -> Optional[int]:
+    return None if v is None else int(v)
 
 
 class Seat:
@@ -195,7 +198,7 @@ class Room:
                 self.set_rounds(pid, msg.get("rounds"))
             elif kind == "visibility":
                 self.set_visibility(pid, str(msg.get("visibility")))
-            elif kind in ("discard", "self", "claim", "predraw"):
+            elif kind in ("discard", "self", "claim", "item"):
                 if seat is None or self.match is None:
                     raise GameError("你不在牌局里")
                 r = self.match.round
@@ -206,28 +209,24 @@ class Room:
                 elif kind == "claim":
                     r.respond(seat, str(msg.get("action")))
                 else:
-                    await self._predraw(seat, pid, r, msg)
+                    await self._use_item(seat, pid, r, msg)
             else:
                 return
             await self._changed()
 
-    async def _predraw(self, seat: int, pid: str, r, msg: dict) -> None:
-        action = str(msg.get("action", "skip"))
-        if action == "skip":
-            r.act_predraw(seat, "skip")
-            return
+    async def _use_item(self, seat: int, pid: str, r, msg: dict) -> None:
+        """使用技能：先从数据库扣除库存，操作不合规则再退回去。"""
         item = str(msg.get("item"))
         if item not in ITEM_NAMES:
-            raise GameError("没有这个道具")
+            raise GameError("没有这个技能")
         uid = int(pid)
         if not await run_in_threadpool(store.consume, uid, item):
-            raise GameError("你没有这个道具了")
+            raise GameError("你没有这个技能了")
         try:
-            kind = msg.get("kind")
-            src = msg.get("src")
-            r.act_predraw(seat, "item", item=item,
-                          kind=None if kind is None else int(kind),
-                          src=None if src is None else int(src))
+            r.use_item(seat, item,
+                       kind=_opt_int(msg.get("kind")),
+                       src=_opt_int(msg.get("src")),
+                       opp=_opt_int(msg.get("opp")))
         except GameError:
             await run_in_threadpool(store.refund, uid, item)
             raise
@@ -282,14 +281,12 @@ class Room:
             if not self.match.finished:
                 self._bot_task = asyncio.ensure_future(self._next_round(v))
             return
-        if r.phase == "predraw":
-            if self.seats[r.turn].bot:
-                self._bot_task = asyncio.ensure_future(self._bot_turn(v))
-            else:
-                self._human_task = asyncio.ensure_future(self._human_timeout(v, PREDRAW_TIMEOUT))
-            return
         if r.phase == "discard":
-            if self.seats[r.turn].bot:
+            seat = r.turn
+            # 明牌的人托管：摸什么打什么；只有能暗杠时才让他自己选
+            prompt = (not self.seats[seat].bot and r.opened[seat]
+                      and any(o["action"] == "gang_an" for o in r.self_options(seat)))
+            if self.seats[seat].bot or (r.opened[seat] and not prompt):
                 self._bot_task = asyncio.ensure_future(self._bot_turn(v))
             else:
                 self._human_task = asyncio.ensure_future(self._human_timeout(v, DISCARD_TIMEOUT))
@@ -328,10 +325,7 @@ class Room:
     def _auto_step(self, include_humans: bool) -> None:
         """替电脑（以及超时的真人）做一步操作。电脑不用道具，超时就直接摸牌。"""
         r = self.match.round
-        if r.phase == "predraw":
-            if self.seats[r.turn].bot or include_humans:
-                r.act_predraw(r.turn, "skip")
-        elif r.phase == "claim":
+        if r.phase == "claim":
             for t in list(r.pending):
                 if r.phase != "claim":
                     break
@@ -347,13 +341,18 @@ class Room:
                 r.respond(t, act)
         elif r.phase == "discard":
             seat = r.turn
-            if not (self.seats[seat].bot or include_humans):
+            if not (self.seats[seat].bot or r.opened[seat] or include_humans):
                 return
             opts = [o for o in r.self_options(seat) if o["action"] != "open"]
             if self.seats[seat].bot:
                 act, kind = ai.decide_self(r.hands[seat], len(r.melds[seat]), r.visible(), opts)
             elif any(o["action"] == "hu" for o in opts):
                 act, kind = "hu", -1
+            elif r.opened[seat]:
+                # 明牌的人：摸什么打什么（不能打的话，打一张允许的）
+                allowed = r.allowed_discards(seat)
+                act = "discard"
+                kind = r.draw_kind if r.draw_kind in allowed else allowed[0]
             else:
                 act, kind = "discard", ai.choose_discard(r.hands[seat], len(r.melds[seat]), r.visible())
             if act == "discard":
@@ -414,8 +413,9 @@ class Room:
                 "hand": R.expand(r.hands[me]) if me is not None else [],
                 "drawn": bool(r.drawn and r.turn == me),
                 "self": r.self_options(me) if me is not None else [],
-                "predraw": r.predraw_options(me) if me is not None else [],
+                "items": r.item_options(me) if me is not None else [],
                 "stock": r.stock[me] if me is not None else {},
+                "drawKind": r.draw_kind if (me is not None and r.drawn and r.turn == me) else None,
                 "claim": claim,
                 "result": r.result,
             }
