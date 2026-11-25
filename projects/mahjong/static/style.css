@@ -193,23 +193,16 @@ button.small { padding: 6px 10px; font-size: 14px; }
   background: linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, 0));
   pointer-events: none;
 }
-.tile b { font-size: 19px; line-height: 1; }
-.tile i { font-style: normal; font-size: 12px; line-height: 1.1; }
-.tile.wan i, .tile.wan b { color: var(--wan); }
-.tile.tiao i, .tile.tiao b { color: var(--tiao); }
-.tile.tong i, .tile.tong b { color: var(--tong); }
-.tile.zhong b, .tile.zhong i { color: var(--zhong); }
-.tile.fa b, .tile.fa i { color: var(--fa); }
-.tile.bai b, .tile.bai i { color: var(--bai); }
-.tile.bai { background: linear-gradient(160deg, #ffffff, #eef0f3); }
-.tile.bai::after {
-  content: ""; position: absolute; inset: 5px; border: 1.5px solid #b8c2cc; border-radius: 3px;
+.tile svg {
+  position: absolute;
+  left: 9%; top: 7%;
+  width: 82%; height: 86%;
+  pointer-events: none;
 }
 
 .tile.small { width: 24px; height: 34px; border-radius: 4px; box-shadow: 0 1px 0 #cdc39f, 0 2px 0 #bdb38e, 0 4px 6px rgba(0,0,0,.4); }
-.tile.small b { font-size: 14px; }
-.tile.small i { font-size: 9px; }
 .tile.small::before { top: 2px; left: 2px; right: 2px; }
+.tile.small svg { left: 8%; top: 6%; width: 84%; height: 88%; }
 
 .tile.back {
   background:
@@ -217,8 +210,7 @@ button.small { padding: 6px 10px; font-size: 14px; }
     linear-gradient(160deg, #3f9a6f, #245c42);
   box-shadow: 0 1px 0 #1a4530, 0 2px 0 #163a29, 0 3px 0 #123024, 0 6px 8px rgba(0,0,0,.45);
 }
-.tile.back::before, .tile.back::after { display: none; }
-.tile.back b, .tile.back i { display: none; }
+.tile.back::before { display: none; }
 
 .tile.last { outline: 3px solid var(--accent); outline-offset: 1px; }
 .tile.clickable { cursor: pointer; }
@@ -240,8 +232,6 @@ button.small { padding: 6px 10px; font-size: 14px; }
 }
 .hand .tile.clickable:hover { transform: perspective(500px) rotateX(20deg) translateY(-8px); }
 .hand .tile.selected { transform: perspective(500px) rotateX(20deg) translateY(-18px); }
-.hand .tile b { font-size: 24px; }
-.hand .tile i { font-size: 14px; }
 
 .meld-group { display: inline-flex; gap: 2px; margin-right: 8px; }
 .discards { margin-top: 6px; }
@@ -290,12 +280,8 @@ button.small { padding: 6px 10px; font-size: 14px; }
   #seat-left, #seat-right { transform: none; }
   .seat.side .discards { max-width: none; }
   .tile { width: 28px; height: 40px; }
-  .tile b { font-size: 15px; }
   .tile.small { width: 18px; height: 25px; }
-  .tile.small b { font-size: 11px; }
   .hand .tile { width: 32px; height: 46px; }
-  .hand .tile b { font-size: 17px; }
-  .hand .tile i { font-size: 11px; }
   .center { min-height: 80px; }
   .panel { margin: 16px auto; }
 }

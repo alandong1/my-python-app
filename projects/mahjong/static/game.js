@@ -32,6 +32,97 @@
     return `${(kind % 9) + 1}${SUIT_NAMES[Math.floor(kind / 9)]}`;
   }
 
+  // ---- 牌面图案（SVG，坐标系 100 × 140）。图案内容是固定的，不含用户输入。
+  const NUM_CH = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  const RED = '#b3262b', GREEN = '#1b7a3d', BLUE = '#1f4e9c';
+
+  // 筒子的圆点位置（按麻将牌的常见排法）
+  const DOT_LAYOUT = {
+    1: [[50, 70]],
+    2: [[50, 45], [50, 95]],
+    3: [[50, 30], [50, 70], [50, 110]],
+    4: [[32, 45], [68, 45], [32, 95], [68, 95]],
+    5: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]],
+    6: [[32, 36], [68, 36], [32, 70], [68, 70], [32, 104], [68, 104]],
+    7: [[50, 32], [32, 60], [68, 60], [32, 86], [68, 86], [32, 112], [68, 112]],
+    8: [[32, 34], [68, 34], [50, 56], [32, 78], [68, 78], [50, 100], [32, 118], [68, 118]],
+    9: [[30, 32], [50, 32], [70, 32], [30, 70], [50, 70], [70, 70], [30, 108], [50, 108], [70, 108]],
+  };
+
+  function dotFace(n) {
+    const r = n === 1 ? 26 : (n <= 3 ? 14 : (n <= 6 ? 12 : 9));
+    const dots = DOT_LAYOUT[n].map(([x, y]) => (
+      `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${BLUE}" stroke-width="3.5"/>` +
+      `<circle cx="${x}" cy="${y}" r="${r * 0.55}" fill="none" stroke="${RED}" stroke-width="3"/>`
+    )).join('');
+    return `<svg viewBox="0 0 100 140" aria-hidden="true">${dots}</svg>`;
+  }
+
+  // 条子：n 根竹子，1 条是一只鸡（妖姬）
+  function bambooFace(n) {
+    if (n === 1) {
+      return `<svg viewBox="0 0 100 140" aria-hidden="true">
+        <ellipse cx="50" cy="82" rx="30" ry="24" fill="${GREEN}"/>
+        <path d="M30 72 Q10 60 12 40 Q30 52 40 66 Z" fill="${RED}"/>
+        <circle cx="66" cy="50" r="15" fill="${GREEN}"/>
+        <path d="M60 36 q6 -10 12 0 q6 -8 10 2 q-8 4 -22 2 z" fill="${RED}"/>
+        <path d="M80 52 l10 4 l-10 4 z" fill="#e0a526"/>
+        <circle cx="70" cy="48" r="2.5" fill="#fff"/>
+        <path d="M40 104 l-4 22 M56 104 l4 22" stroke="#e0a526" stroke-width="4"/>
+      </svg>`;
+    }
+    const cols = n <= 3 ? n : Math.ceil(Math.sqrt(n));
+    const rows = Math.ceil(n / cols);
+    const w = cols === 1 ? 26 : (cols === 2 ? 22 : 18);
+    const h = rows === 1 ? 92 : (rows === 2 ? 52 : 36);
+    let out = '';
+    for (let i = 0; i < n; i++) {
+      const c = i % cols;
+      const rr = Math.floor(i / cols);
+      const cellW = 100 / cols, cellH = 140 / rows;
+      const x = cellW * c + cellW / 2 - w / 2;
+      const y = cellH * rr + cellH / 2 - h / 2;
+      out += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${w / 2}" fill="${GREEN}" stroke="#0f4d28" stroke-width="2.5"/>`;
+      for (let j = 1; j < 4; j++) {
+        const ly = y + (h * j) / 4;
+        out += `<line x1="${x + 2}" y1="${ly}" x2="${x + w - 2}" y2="${ly}" stroke="#a8e6bd" stroke-width="2"/>`;
+      }
+    }
+    return `<svg viewBox="0 0 100 140" aria-hidden="true">${out}</svg>`;
+  }
+
+  // 万子：大号数字（汉字）加一个「萬」
+  function characterFace(n) {
+    return `<svg viewBox="0 0 100 140" aria-hidden="true">
+      <text x="50" y="66" text-anchor="middle" font-size="60" font-weight="700" fill="${RED}" font-family="serif">${NUM_CH[n - 1]}</text>
+      <text x="50" y="126" text-anchor="middle" font-size="44" font-weight="700" fill="${RED}" font-family="serif">萬</text>
+    </svg>`;
+  }
+
+  function honorFace(kind) {
+    if (kind === 27) {   // 红中
+      return `<svg viewBox="0 0 100 140" aria-hidden="true">
+        <text x="50" y="92" text-anchor="middle" font-size="84" font-weight="700" fill="${RED}" font-family="serif">中</text></svg>`;
+    }
+    if (kind === 28) {   // 发财
+      return `<svg viewBox="0 0 100 140" aria-hidden="true">
+        <text x="50" y="92" text-anchor="middle" font-size="76" font-weight="700" fill="${GREEN}" font-family="serif">發</text></svg>`;
+    }
+    // 白板：只有一个蓝色边框
+    return `<svg viewBox="0 0 100 140" aria-hidden="true">
+      <rect x="16" y="22" width="68" height="96" rx="6" fill="none" stroke="${BLUE}" stroke-width="6"/>
+      <rect x="24" y="30" width="52" height="80" rx="3" fill="none" stroke="${BLUE}" stroke-width="2" opacity=".5"/></svg>`;
+  }
+
+  function faceSvg(kind) {
+    if (kind >= 27) return honorFace(kind);
+    const suit = Math.floor(kind / 9);
+    const n = (kind % 9) + 1;
+    if (suit === 0) return characterFace(n);
+    if (suit === 1) return bambooFace(n);
+    return dotFace(n);
+  }
+
   function tileEl(kind, opts = {}) {
     const t = el('span', 'tile');
     if (opts.small) t.classList.add('small');
@@ -39,13 +130,9 @@
       t.classList.add('back');
       return t;
     }
-    if (isHonor(kind)) {
-      t.classList.add(HONOR_CLASS[kind - 27]);
-      t.append(el('b', null, HONOR_NAMES[kind - 27]));
-    } else {
-      t.classList.add(SUIT_CLASS[Math.floor(kind / 9)]);
-      t.append(el('b', null, String((kind % 9) + 1)), el('i', null, SUIT_NAMES[Math.floor(kind / 9)]));
-    }
+    t.classList.add(isHonor(kind) ? HONOR_CLASS[kind - 27] : SUIT_CLASS[Math.floor(kind / 9)]);
+    t.innerHTML = faceSvg(kind);
+    t.title = tileName(kind);
     return t;
   }
 
@@ -331,8 +418,9 @@
     }
     for (const w of res.winners) {
       const how = w.selfDraw ? '自摸' : `点炮（${seatName(res.from)} 放炮）`;
-      card.append(el('p', 'win-line', `${seatName(w.seat)} ${how}：${w.fan} 番`));
-      card.append(el('p', 'detail', w.items.map(([n, v]) => `${n} ${v} 番`).join('，')));
+      const fanText = w.fan ? `${w.fan} 翻` : '屁胡（不翻）';
+      card.append(el('p', 'win-line', `${seatName(w.seat)} ${how}：${fanText}，${w.points} 分`));
+      card.append(el('p', 'detail', w.items.length ? w.items.map(([n, v]) => `${n} ${v} 翻`).join('，') : '底分 1 分'));
     }
 
     const table = el('table');

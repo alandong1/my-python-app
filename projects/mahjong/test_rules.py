@@ -70,33 +70,48 @@ def test_win_needs_exact_tile_count():
     assert not R.is_win(c, 0)
 
 
-def test_pinghu_is_one_fan_without_self_draw():
-    fan, items, base = R.score_win(pinghu14(), [], False)
-    assert items == [("屁胡", 1)]
-    assert fan == 1 and base == 1
+def test_pinghu_is_zero_fan():
+    fan, items, pattern = R.score_win(pinghu14(), [], False)
+    assert fan == 0 and items == [] and pattern == 0
 
 
-def test_pinghu_plus_self_draw_is_two_fan():
-    fan, items, base = R.score_win(pinghu14(), [], True)
-    assert fan == 2 and base == 1
-    assert ("自摸", 1) in items
+def test_pinghu_self_draw_is_one_fan():
+    fan, items, pattern = R.score_win(pinghu14(), [], True)
+    assert fan == 1 and ("自摸", 1) in items and pattern == 0
 
 
-def test_five_stars_add_fan():
-    c = win14()                 # 含一张五万
-    fan, items, base = R.score_win(c, [], False)
-    assert ("屁胡", 1) in items and ("五星", 1) in items
-    assert base == 2 and fan == 2
-    fan_self, _, base_self = R.score_win(c, [], True)
-    assert fan_self == 3 and base_self == 2
+def test_opened_adds_one_fan():
+    fan, items, pattern = R.score_win(pinghu14(), [], False, opened=True)
+    assert fan == 1 and ("明牌", 1) in items and pattern == 0
 
 
-def test_five_stars_in_melds():
-    c = R.counts_of([9, 9, 9, 0, 1, 2, 6, 7, 8, 18, 18])
-    melds = [{"type": "gang_ming", "kind": 4, "from": 1}]
-    fan, items, base = R.score_win(c, melds, False)
-    assert ("五星", 4) in items
-    assert base == 5
+def test_seven_pairs_is_two_fan():
+    c = R.counts_of([0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 27, 27])
+    fan, items, pattern = R.score_win(c, [], False)
+    assert ("七对", 2) in items and fan == 2 and pattern == 2
+
+
+def test_one_suit_is_two_fan():
+    c = R.counts_of([0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 1, 1, 2])   # 只有万
+    c = R.counts_of([0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1, 2, 3, 4])
+    fan, items, pattern = R.score_win(c, [], False)
+    assert ("清一色", 2) in items and pattern == 2
+
+
+def test_honor_breaks_one_suit():
+    c = R.counts_of([0, 1, 2, 3, 4, 5, 6, 7, 8, 27, 27, 27, 0, 0])
+    fan, items, pattern = R.score_win(c, [], False)
+    assert all(name != "清一色" for name, _ in items)
+
+
+def test_ming_four_is_one_fan_and_an_four_is_two():
+    c = R.counts_of([0, 1, 2, 3, 4, 5, 6, 7, 8, 27, 27, 27, 28, 28])
+    ming = [{"type": "gang_ming", "kind": 4, "from": 1}]
+    fan, items, pattern = R.score_win(c, ming, False)
+    assert ("明四归一", 1) in items and pattern == 1
+    an = [{"type": "gang_an", "kind": 4, "from": None}]
+    fan, items, pattern = R.score_win(c, an, False)
+    assert ("暗四归一", 2) in items and pattern == 2
 
 
 def test_expand_round_trip():

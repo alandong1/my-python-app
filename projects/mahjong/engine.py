@@ -12,8 +12,8 @@
   over     这一局结束，结果在 Round.result 里
 
 和牌规则：
-  - 至少两番才能和。屁胡（只有基本的 1 番）只能靠自摸和牌；
-    如果这家已经明牌，屁胡也可以让别人点炮。
+  - 屁胡不翻（底分 1 分），只能靠自摸和牌；听牌后明牌的人，屁胡也可以让别人点炮。
+  - 点炮和牌需要大胡（牌型至少 2 翻）或者已经明牌。
 """
 from __future__ import annotations
 
@@ -78,25 +78,40 @@ class Round:
     def _can_win(self, seat: int, kind: Optional[int], self_draw: bool) -> Optional[dict]:
         """seat 能不能和牌。kind 是别人打出的那张（点炮时），自摸时为 None。
 
-        能和返回 {fan, items, hand}，不能和返回 None。
+        能和返回 {fan, points, items, hand}，不能和返回 None。
+        点炮的条件：大胡（牌型翻数至少 2），或者已经明牌（屁胡明牌可以点炮）。
+        自摸随时可以和（屁胡自摸也可以）。
         """
         c = list(self.hands[seat])
         if kind is not None:
             c[kind] += 1
         if not R.is_win(c, len(self.melds[seat])):
             return None
-        fan, items, base = R.score_win(c, self.melds[seat], self_draw)
-        if self_draw or base >= 2 or (base == 1 and self.opened[seat]):
-            return {"fan": fan, "items": items, "hand": R.expand(c)}
+        fan, items, pattern = R.score_win(c, self.melds[seat], self_draw, self.opened[seat])
+        if self_draw or pattern >= 2 or self.opened[seat]:
+            return {"fan": fan, "points": 2 ** fan, "items": items, "hand": R.expand(c)}
         return None
+
+    def _tenpai(self, seat: int) -> bool:
+        """seat 现在的手牌打掉某一张之后能听牌（向听数为 0 或已和）。"""
+        c = list(self.hands[seat])
+        k = len(self.melds[seat])
+        for d in range(R.KINDS):
+            if c[d]:
+                c[d] -= 1
+                ok = R.shanten(c, k) <= 0
+                c[d] += 1
+                if ok:
+                    return True
+        return False
 
     def self_options(self, seat: int) -> List[dict]:
         """轮到 seat 时能做的操作：明牌、自摸、暗杠、加杠。"""
         if self.phase != "discard" or seat != self.turn:
             return []
         opts: List[dict] = []
-        if not self.opened[seat]:
-            opts.append({"action": "open", "kind": None})
+        if not self.opened[seat] and self._tenpai(seat):
+            opts.append({"action": "open", "kind": None})     # 听牌之后才能明牌
         if not self.drawn:
             return opts
         c = self.hands[seat]
@@ -243,10 +258,10 @@ class Round:
         winners = []
         for t in hus:
             info = self._can_win(t, kind, False)
-            deltas[src] -= info["fan"]
-            deltas[t] += info["fan"]
-            winners.append({"seat": t, "fan": info["fan"], "items": info["items"],
-                            "hand": info["hand"], "selfDraw": False})
+            deltas[src] -= info["points"]
+            deltas[t] += info["points"]
+            winners.append({"seat": t, "fan": info["fan"], "points": info["points"],
+                            "items": info["items"], "hand": info["hand"], "selfDraw": False})
         self._end("win", winners, src, deltas)
 
     def _win_self(self, seat: int) -> None:
@@ -254,10 +269,10 @@ class Round:
         deltas = list(self.gang_pay)
         for o in range(N_PLAYERS):
             if o != seat:
-                deltas[o] -= info["fan"]
-                deltas[seat] += info["fan"]
-        winners = [{"seat": seat, "fan": info["fan"], "items": info["items"],
-                    "hand": info["hand"], "selfDraw": True}]
+                deltas[o] -= info["points"]
+                deltas[seat] += info["points"]
+        winners = [{"seat": seat, "fan": info["fan"], "points": info["points"],
+                    "items": info["items"], "hand": info["hand"], "selfDraw": True}]
         self._end("win", winners, None, deltas)
 
     def _end_draw(self) -> None:
