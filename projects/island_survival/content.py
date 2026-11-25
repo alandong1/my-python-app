@@ -158,7 +158,7 @@ BUILDS: Dict[str, dict] = {
     "workbench": {"name": "工作台", "cost": {"wood": 6, "stone": 2}, "size": 1, "max_level": 3},
     "campfire": {"name": "火堆", "cost": {"wood": 3, "stone": 1}, "size": 1, "max_level": 3},
     "furnace": {"name": "石炉", "cost": {"stone": 8}, "size": 1, "max_level": 2},
-    "house": {"name": "房子", "cost": {"wood": 20, "stone": 6, "rope": 2}, "size": 3, "max_level": 3},
+    "house": {"name": "房子", "cost": {"wood": 20, "stone": 6, "rope": 2}, "size": 4, "max_level": 3},
 }
 
 # 升级：kind → {新等级: 材料}
@@ -170,7 +170,7 @@ UPGRADES: Dict[str, Dict[int, dict]] = {
 }
 
 # 房子的房间大小（格）：等级 → 边长
-ROOM_SIZE = {1: 8, 2: 10, 3: 12}
+ROOM_SIZE = {1: 10, 2: 12, 3: 14}      # 进屋后房间的大小（房子在外面是 4×4）
 
 
 # 家具效果：kind → (站在旁边时每秒精神, 每秒健康, 范围（格）)

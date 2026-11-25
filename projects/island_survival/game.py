@@ -814,7 +814,7 @@ class Game:
         b = self.buildings.get(p.house)
         p.house = None
         if b is not None:
-            p.x, p.z = b.x + 1.5, b.z + 3.6          # 门口的外面
+            p.x, p.z = b.x + size_of(b.kind) / 2, b.z + size_of(b.kind) + 0.6    # 门口的外面
         else:
             p.x, p.z = p.ox, p.oz
         p.move_x = p.move_z = 0.0

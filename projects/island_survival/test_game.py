@@ -452,7 +452,7 @@ def test_house_upgrade_makes_room_bigger(spot):
     place(p, house.x + 1.5, house.z + 3.6)
     p.inv = {"wood": 20, "stone": 10, "rope": 4}
     g.act(p, "upgrade", {})
-    assert house.level == 2 and C.ROOM_SIZE[2] == 10
+    assert house.level == 2 and C.ROOM_SIZE[2] == 12
 
 
 def test_outdoor_actions_refused_inside(spot):
@@ -1029,7 +1029,7 @@ def test_wolf_night_state_is_saved(g):
 # ------------------------------------------------------------ 第三阶段第三批：房间更大、更多家具
 
 def test_rooms_get_bigger_with_each_upgrade():
-    assert [C.ROOM_SIZE[1], C.ROOM_SIZE[2], C.ROOM_SIZE[3]] == [8, 10, 12]
+    assert [C.ROOM_SIZE[1], C.ROOM_SIZE[2], C.ROOM_SIZE[3]] == [10, 12, 14]
 
 
 def test_fireplace_and_bookshelf_are_furniture_and_recipes_exist():
