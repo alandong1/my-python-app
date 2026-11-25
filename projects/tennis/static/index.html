@@ -43,18 +43,17 @@
     <div id="view"></div>
     <div id="scoreBoard"></div>
     <div id="hudMsg"></div>
-    <div id="hint" class="hint">摇杆移动 · 右边选球种后击球 · 击球时摇杆的左右、前后决定落点</div>
+    <div id="shotLog"></div>
 
-    <div id="joy" aria-label="摇杆"><div id="knob"></div></div>
-
-    <div id="strokes">
-      <button data-stroke="flat">平击<kbd>1</kbd></button>
-      <button data-stroke="top">上旋<kbd>2</kbd></button>
-      <button data-stroke="back">下旋<kbd>3</kbd></button>
-      <button data-stroke="side_l">侧旋←<kbd>4</kbd></button>
-      <button data-stroke="side_r">侧旋→<kbd>5</kbd></button>
+    <div id="menu" hidden>
+      <div class="menu-head">
+        <b id="menuTitle"></b>
+        <span id="menuTimer" class="muted"></span>
+      </div>
+      <div id="menuSub" class="menu-sub"></div>
+      <div id="menuCards" class="cards"></div>
     </div>
-    <button id="hitBtn">击球<kbd>空格</kbd></button>
+
     <button id="exitBtn">离开</button>
 
     <div id="over" hidden>

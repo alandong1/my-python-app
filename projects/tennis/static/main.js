@@ -14,9 +14,6 @@ const S = {
   rooms: [],
   room: null,           // 房间信息（从 state.room 来）
   state: null,          // 最新的比赛状态
-  stroke: 'flat',
-  stick: { f: 0, r: 0 },
-  sent: { f: 0, r: 0 },
 };
 
 // ------------------------------------------------------------ 小工具
@@ -185,19 +182,29 @@ function renderRoom(state) {
       : '等待房主开始比赛…';
 }
 
-// ------------------------------------------------------------ 三维场景
+// ------------------------------------------------------------ 三维场景（抽象的小人，抬高的视角）
+
+const ZONE_X = { back: 10.6, mid: 7.0, net: 2.6 };   // 站位对应的 x 坐标（队 1 的一侧）
+const ZONE_TEXT = { back: '后场', mid: '中场', net: '网前' };
+const SITUATION_TEXT = {
+  serve: '轮到你发球',
+  deep: '球落在你的后场',
+  short: '对方打来短球',
+  lob: '对方挑高过来',
+};
+const TEAM_COLOR = [0xe4572e, 0x2e86de];
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9fd6ff);
-scene.fog = new THREE.Fog(0x9fd6ff, 70, 220);
-const camera = new THREE.PerspectiveCamera(72, 1, 0.05, 400);
+scene.background = new THREE.Color(0xa8dcff);
+scene.fog = new THREE.Fog(0xa8dcff, 45, 120);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 300);
 const renderer = new THREE.WebGLRenderer({ canvas: document.createElement('canvas'), antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 $('view').append(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x3a5a3a, 0.9));
-const sun = new THREE.DirectionalLight(0xffffff, 0.7);
-sun.position.set(10, 30, 6);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3a5a3a, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+sun.position.set(8, 30, 10);
 scene.add(sun);
 
 function mat(color, extra = {}) { return new THREE.MeshLambertMaterial({ color, ...extra }); }
@@ -208,70 +215,53 @@ function addBox(w, h, d, x, y, z, material) {
   return m;
 }
 
-// 场地：草地外场 + 蓝色硬地 + 白线
-const grass = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat(0x4f8f4a));
+// 场地：草地 + 硬地 + 白线
+const grass = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), mat(0x5a9a52));
 grass.rotation.x = -Math.PI / 2;
+grass.position.y = -0.05;          // 草地比硬地低一点，避免两个平面「打架」
 scene.add(grass);
 const court = new THREE.Mesh(new THREE.PlaneGeometry(23.77, 10.97), mat(0x2f6fb0));
 court.rotation.x = -Math.PI / 2;
-court.position.y = 0.002;
+court.position.y = 0.01;
 scene.add(court);
 const WHITE = new THREE.MeshBasicMaterial({ color: 0xffffff });
-const LINE_T = 0.06;
-addBox(LINE_T, 0.01, 10.97 + LINE_T, -11.885, 0.005, 0, WHITE);          // 底线
-addBox(LINE_T, 0.01, 10.97 + LINE_T, 11.885, 0.005, 0, WHITE);
-addBox(23.77, 0.01, LINE_T, 0, 0.005, -5.485, WHITE);                    // 双打边线
-addBox(23.77, 0.01, LINE_T, 0, 0.005, 5.485, WHITE);
-addBox(23.77, 0.01, LINE_T, 0, 0.005, -4.115, WHITE);                    // 单打边线
-addBox(23.77, 0.01, LINE_T, 0, 0.005, 4.115, WHITE);
-addBox(LINE_T, 0.01, 8.23, -6.4, 0.005, 0, WHITE);                       // 发球线
-addBox(LINE_T, 0.01, 8.23, 6.4, 0.005, 0, WHITE);
-addBox(12.8, 0.01, LINE_T, 0, 0.005, 0, WHITE);                          // 中线
-// 看台：让远处有纵深感
+const LT = 0.07;
+addBox(LT, 0.01, 10.97 + LT, -11.885, 0.005, 0, WHITE);
+addBox(LT, 0.01, 10.97 + LT, 11.885, 0.005, 0, WHITE);
+addBox(23.77, 0.01, LT, 0, 0.005, -5.485, WHITE);
+addBox(23.77, 0.01, LT, 0, 0.005, 5.485, WHITE);
+addBox(23.77, 0.01, LT, 0, 0.005, -4.115, WHITE);
+addBox(23.77, 0.01, LT, 0, 0.005, 4.115, WHITE);
+addBox(LT, 0.01, 8.23, -6.4, 0.005, 0, WHITE);
+addBox(LT, 0.01, 8.23, 6.4, 0.005, 0, WHITE);
+addBox(12.8, 0.01, LT, 0, 0.005, 0, WHITE);
+// 看台（抽象的几块灰色）
 const stand = mat(0x8a8f99);
 for (const side of [-1, 1]) {
-  addBox(4, 5, 60, side * 40, 2.5, 0, stand);
+  addBox(4, 5, 60, side * 34, 2.5, 0, stand);
   addBox(60, 5, 4, 0, 2.5, side * 22, stand);
 }
-
 // 球网
-const netCanvas = document.createElement('canvas');
-netCanvas.width = 64; netCanvas.height = 32;
-{
-  const g = netCanvas.getContext('2d');
-  g.fillStyle = 'rgba(255,255,255,0.0)'; g.fillRect(0, 0, 64, 32);
-  g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 2;
-  for (let x = 0; x <= 64; x += 8) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 32); g.stroke(); }
-  for (let y = 0; y <= 32; y += 8) { g.beginPath(); g.moveTo(0, y); g.lineTo(64, y); g.stroke(); }
-}
-const netTex = new THREE.CanvasTexture(netCanvas);
-netTex.wrapS = netTex.wrapT = THREE.RepeatWrapping;
-netTex.repeat.set(4, 1);
 const netMesh = new THREE.Mesh(
   new THREE.PlaneGeometry(12.8, 0.914),
-  new THREE.MeshBasicMaterial({ map: netTex, transparent: true, side: THREE.DoubleSide, opacity: 0.85 }),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, side: THREE.DoubleSide }),
 );
 netMesh.rotation.y = Math.PI / 2;
 netMesh.position.set(0, 0.457, 0);
 scene.add(netMesh);
-addBox(0.03, 0.05, 12.8, 0, 0.914, 0, WHITE);                           // 网顶白带
-for (const z of [-6.4, 6.4]) {
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.07, 8), mat(0x222222));
-  post.position.set(0, 0.535, z);
-  scene.add(post);
-}
+addBox(0.04, 0.06, 12.8, 0, 0.914, 0, WHITE);
 
-// 球
-const ball = new THREE.Mesh(new THREE.SphereGeometry(0.0335, 14, 10), mat(0xd4ff3a, { emissive: 0x223300 }));
+// 球：画得大一点，抬高视角后也能看清
+const ball = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), mat(0xd4ff3a, { emissive: 0x335500 }));
 scene.add(ball);
 const ballShadow = new THREE.Mesh(
-  new THREE.CircleGeometry(0.22, 18),
-  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }),
+  new THREE.CircleGeometry(0.28, 18),
+  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }),
 );
 ballShadow.rotation.x = -Math.PI / 2;
 scene.add(ballShadow);
 
-// 人物（对手可见，自己是第一人称看不见身体）
+// 小人：圆柱身体、球形头、一只手臂（拿着球拍）
 function nameSprite(text) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
@@ -280,43 +270,137 @@ function nameSprite(text) {
   g.fillStyle = '#fff'; g.font = 'bold 30px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(text.slice(0, 8), 128, 34);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
-  sp.scale.set(1.6, 0.4, 1);
-  sp.position.y = 2.1;
+  sp.scale.set(2.2, 0.55, 1);
+  sp.position.y = 2.25;
   return sp;
 }
-const TEAM_COLOR = [0xe4572e, 0x2e86de];
-const players = new Map();   // seat index -> {group, target:{x,z}, name, userId}
+const figures = new Map();   // 座位号 -> {group, arm, x, z, tx, tz, team, swingT}
 
-function makePlayer(seat) {
+function makeFigure(seat) {
   const group = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 1.35, 10), mat(TEAM_COLOR[seat.team]));
-  body.position.y = 0.8;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), mat(0xf2c9a0));
-  head.position.y = 1.65;
-  group.add(body, head, nameSprite(seat.name));
+  const color = TEAM_COLOR[seat.team];
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 1.2, 10), mat(color));
+  body.position.y = 0.9;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), mat(0xf4d6b0));
+  head.position.y = 1.7;
+  // 手臂挂在肩膀上，转动它就是挥拍
+  const arm = new THREE.Group();
+  arm.position.set(0.36, 1.35, 0);
+  const limb = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.75, 0.1), mat(0xf4d6b0));
+  limb.position.y = -0.38;
+  const racket = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.025, 6, 16), mat(0x222222));
+  racket.position.set(0, -0.85, 0);
+  racket.scale.set(1, 1.3, 1);
+  arm.add(limb, racket);
+  group.add(body, head, arm, nameSprite(seat.name));
   scene.add(group);
-  return { group, name: seat.name, userId: seat.userId, x: seat.x, z: seat.z, tx: seat.x, tz: seat.z };
+  return { group, arm, x: 0, z: seat.z, tx: 0, tz: seat.z, team: seat.team, swingT: -1 };
 }
 
-// 本地的球拍：挂在摄像机上，右下角
-const racket = new THREE.Group();
-{
-  const head = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.013, 8, 26), mat(0x20262e));
-  head.scale.set(1, 1.3, 1);
-  const face = new THREE.Mesh(new THREE.CircleGeometry(0.17, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, side: THREE.DoubleSide }));
-  face.scale.set(1, 1.3, 1);
-  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.26, 0.02), mat(0x111111));
-  handle.position.y = -0.3;
-  racket.add(head, face, handle);
-  racket.position.set(0.3, -0.36, -0.55);
-  racket.rotation.set(0.25, 0.2, -0.5);
-  camera.add(racket);
-  scene.add(camera);
+function zoneX(team, zone) {
+  return (team === 0 ? -1 : 1) * ZONE_X[zone];
 }
-let swingT = -1;   // 挥拍动画的进度（-1 表示没在挥）
-function playSwing() { swingT = 0; }
 
-// ------------------------------------------------------------ 渲染循环
+// 把服务器的站位同步到场景里（小人会平滑地走到新位置）
+function applyState(state) {
+  for (const s of state.seats) {
+    if (!s) continue;
+    let f = figures.get(s.index);
+    if (!f || f.userId !== s.userId) {
+      if (f) scene.remove(f.group);
+      f = makeFigure(s);
+      f.userId = s.userId;
+      figures.set(s.index, f);
+      f.x = f.tx = zoneX(s.team, s.zone);
+    }
+    f.tx = zoneX(s.team, s.zone);
+    f.tz = s.z;
+  }
+  for (const [idx, f] of figures) {
+    if (!state.seats[idx]) { scene.remove(f.group); figures.delete(idx); }
+  }
+  for (const ev of state.events) {
+    if (ev.type === 'shot') startShotAnimation(ev);
+  }
+}
+
+// 击球动画：球从击球的小人身上沿弧线飞向落点
+let shotAnim = null;   // {t, dur, from, to, arc, seat, result}
+function startShotAnimation(ev) {
+  const f = figures.get(ev.seat);
+  if (!f) return;
+  f.swingT = 0;
+  const from = new THREE.Vector3(f.x, 1.2, f.tz);
+  let to;
+  if (ev.toZone === 'far') {
+    to = new THREE.Vector3((ev.toTeam === 0 ? -1 : 1) * 15, 0.2, f.tz * 1.6);
+  } else if (ev.toZone === 'net') {
+    to = new THREE.Vector3(0, 0.3, f.tz);
+  } else {
+    to = new THREE.Vector3(zoneX(ev.toTeam, ev.toZone), 0.2, (Math.random() - 0.5) * 3);
+  }
+  shotAnim = { t: 0, dur: 1.3, from, to, arc: ev.arc ? 3.4 : 1.0, result: ev.result, fail: ev.fail };
+}
+
+const camLook = new THREE.Vector3(0, 0.6, 0);
+const camPos = new THREE.Vector3();
+let lastFrame = performance.now();
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - lastFrame) / 1000);
+  lastFrame = now;
+  const state = S.state;
+  if (!state || S.view !== 'game') return;
+
+  // 小人平滑移动并挥拍
+  const k = 1 - Math.pow(0.001, dt);
+  for (const f of figures.values()) {
+    f.x += (f.tx - f.x) * k;
+    f.z += (f.tz - f.z) * k;
+    f.group.position.set(f.x, 0, f.z);
+    if (f.swingT >= 0) {
+      f.swingT += dt / 0.45;
+      const a = Math.sin(Math.min(1, f.swingT) * Math.PI);
+      f.arm.rotation.z = -a * 1.6;
+      if (f.swingT >= 1) { f.swingT = -1; f.arm.rotation.z = 0; }
+    }
+  }
+
+  // 球：击球动画中沿弧线飞；平时停在击球方身前；得分后隐藏
+  if (shotAnim) {
+    shotAnim.t += dt;
+    const u = Math.min(1, shotAnim.t / shotAnim.dur);
+    ball.position.lerpVectors(shotAnim.from, shotAnim.to, u);
+    ball.position.y += Math.sin(Math.PI * u) * shotAnim.arc;
+    ball.visible = true;
+    if (u >= 1) shotAnim = null;
+  } else {
+    const hitter = state.hitter != null ? figures.get(state.hitter) : null;
+    if (hitter && (state.phase === 'menu' || state.phase === 'serve_menu')) {
+      ball.position.set(hitter.x + (hitter.team === 0 ? 0.8 : -0.8), 1.4 + Math.sin(now / 300) * 0.1, hitter.tz);
+      ball.visible = true;
+    } else if (state.phase === 'animating') {
+      ball.visible = true;
+    } else {
+      ball.visible = false;
+    }
+  }
+  ballShadow.position.set(ball.position.x, 0.005, ball.position.z);
+  const hgt = Math.max(0.35, 1 - ball.position.y * 0.1);
+  ballShadow.scale.set(hgt, hgt, hgt);
+  ballShadow.visible = ball.visible;
+
+  // 摄像机：抬高，站在自己这一边的后面，斜着往下看整个球场
+  const side = myTeam() === 0 ? -1 : 1;
+  camPos.set(side * 19.5, 8.6, 0);
+  camera.position.lerp(camPos, 0.2);
+  camLook.set(0, 0.6, 0);
+  camera.lookAt(camLook);
+
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
 
 function resizeRenderer() {
   const w = $('view').clientWidth || window.innerWidth;
@@ -327,86 +411,7 @@ function resizeRenderer() {
 }
 window.addEventListener('resize', resizeRenderer);
 
-// 把服务器的状态同步到场景里（位置会在每一帧平滑追过去）
-function applyState(state) {
-  for (const s of state.seats) {
-    if (!s) continue;
-    let p = players.get(s.index);
-    if (!p || p.userId !== s.userId) {
-      if (p) scene.remove(p.group);
-      p = makePlayer(s);
-      players.set(s.index, p);
-    }
-    p.tx = s.x;
-    p.tz = s.z;
-  }
-  for (const [idx, p] of players) {
-    if (!state.seats[idx]) { scene.remove(p.group); players.delete(idx); }
-  }
-  for (const ev of state.events) {
-    if (ev.type === 'hit' && ev.seat === mySeat(state)?.index) playSwing();
-  }
-}
-
-const camPos = new THREE.Vector3(0, 1.7, 0);
-const lookPos = new THREE.Vector3(0, 1.2, 0);
-const ballTarget = new THREE.Vector3();
-let lastFrame = performance.now();
-
-function frame(now) {
-  requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - lastFrame) / 1000);
-  lastFrame = now;
-  const state = S.state;
-  if (!state || S.view !== 'game') return;
-
-  // 人物和球平滑移动
-  const k = 1 - Math.pow(0.0001, dt);   // 每秒追上大部分距离
-  for (const p of players.values()) {
-    p.x += (p.tx - p.x) * k;
-    p.z += (p.tz - p.z) * k;
-    p.group.position.set(p.x, 0, p.z);
-  }
-  const b = state.ball;
-  ballTarget.set(b.x, b.y, b.z);
-  ball.position.lerp(ballTarget, Math.min(1, k * 1.5));
-  ballShadow.position.set(ball.position.x, 0.004, ball.position.z);
-  const hgt = Math.max(0.2, 1 - ball.position.y * 0.12);
-  ballShadow.scale.set(hgt, hgt, hgt);
-
-  // 摄像机：站在自己的位置，朝对面看；视线会慢慢转向球
-  const seat = mySeat(state);
-  const fwd = myTeam() === 0 ? 1 : -1;
-  if (seat && players.get(seat.index)) {
-    const p = players.get(seat.index);
-    camPos.set(p.x, 1.7, p.z);
-  } else {
-    camPos.set(fwd * -12, 6, 0);
-  }
-  const toBall = new THREE.Vector3(ball.position.x - camPos.x, ball.position.y - 1.2, ball.position.z - camPos.z);
-  const forward = new THREE.Vector3(fwd, -0.12, 0);
-  let look = forward.clone();
-  if (toBall.clone().setY(0).dot(forward) > 0) {
-    look = forward.clone().multiplyScalar(0.45).add(toBall.clone().normalize().multiplyScalar(0.55));
-  }
-  look.normalize();
-  lookPos.copy(camPos).addScaledVector(look, 10);
-  camera.position.copy(camPos);
-  camera.lookAt(lookPos);
-
-  // 挥拍动画
-  if (swingT >= 0) {
-    swingT += dt / 0.28;
-    const a = Math.sin(Math.min(1, swingT) * Math.PI);
-    racket.rotation.set(0.25 - a * 1.2, 0.2 - a * 0.6, -0.5 + a * 0.3);
-    if (swingT >= 1) { swingT = -1; racket.rotation.set(0.25, 0.2, -0.5); }
-  }
-
-  renderer.render(scene, camera);
-}
-requestAnimationFrame(frame);
-
-// ------------------------------------------------------------ 比赛界面
+// ------------------------------------------------------------ 比赛界面（三个选项）
 
 function renderScore(state) {
   const sc = state.score;
@@ -421,47 +426,56 @@ function renderScore(state) {
   $('scoreBoard').innerHTML = `我方 ${head} · ${games} · ${points}${sets ? `<br><span style="opacity:.75">已完成：${sets}</span>` : ''}`;
 }
 
-function updateHitButton(state) {
-  const seat = mySeat(state);
-  const btn = $('hitBtn');
-  let label = '击球';
-  let ready = false;
-  if (seat) {
-    const isServer = seat.index === state.serveSeat;
-    if (state.phase === 'serve_wait' && isServer) label = '抛球';
-    else if (state.phase === 'toss' && isServer) {
-      label = '发球';
-      ready = state.ball.y > 1.0 && Math.hypot(state.ball.x - seat.x, state.ball.z - seat.z) < 1.0;
-    } else if (state.phase === 'rally') {
-      ready = seat.index !== state.lastSeat
-        && Math.hypot(state.ball.x - seat.x, state.ball.z - seat.z) < REACH
-        && state.ball.y > -0.1 && state.ball.y < 2.8;
-    }
+// 当前这一次选择：是不是轮到我、局面是什么、对方站在哪里
+let choiceKey = null;   // 已经发送过选择的那一次（防止重复点击）
+
+function renderMenu(state) {
+  const box = $('menu');
+  const mine = mySeat(state);
+  const menu = state.menu;
+  if (!menu || state.status !== 'playing') {
+    box.hidden = true;
+    return;
   }
-  btn.firstChild.textContent = label;
-  btn.classList.toggle('ready', ready);
-}
-
-function renderStrokes() {
-  for (const b of document.querySelectorAll('#strokes button')) {
-    b.classList.toggle('sel', b.dataset.stroke === S.stroke);
+  box.hidden = false;
+  const myTurn = mine && state.hitter === mine.index;
+  const key = `${state.phase}-${state.hitter}-${menu.options.map((o) => o.id).join(',')}`;
+  const oppZone = menu.oppZone ? `对方站在${ZONE_TEXT[menu.oppZone]}` : '';
+  if (!myTurn) {
+    $('menuTitle').textContent = '对方在选择…';
+    $('menuSub').textContent = [SITUATION_TEXT[menu.situation], oppZone].filter(Boolean).join(' · ');
+    $('menuCards').replaceChildren();
+    $('menuTimer').textContent = '';
+    return;
   }
+  $('menuTitle').textContent = menu.situation === 'serve' ? '轮到你发球，选一种发球' : '轮到你，选一种打法';
+  $('menuSub').textContent = menu.situation === 'serve'
+    ? oppZone
+    : [SITUATION_TEXT[menu.situation], oppZone].filter(Boolean).join(' · ');
+  $('menuTimer').textContent = `${Math.ceil(menu.deadline)} 秒内选择`;
+  if (key === choiceKey) return;   // 已经选过了，等服务器的动画
+  const cards = menu.options.map((o, i) => el('button', {
+    class: 'choice',
+    onclick: () => choose(o.id, key),
+  }, [
+    el('span', { class: 'num', text: String(i + 1) }),
+    el('span', { class: 'cname', text: o.name }),
+    el('span', { class: 'cdesc', text: o.desc }),
+  ]));
+  $('menuCards').replaceChildren(...cards);
 }
 
-function selectStroke(name) {
-  S.stroke = name;
-  renderStrokes();
-}
-
-function hitNow() {
-  if (!S.state || S.state.status !== 'playing') return;
-  send({ type: 'swing', stroke: S.stroke, aimR: S.stick.r, aimF: S.stick.f });
+function choose(option, key) {
+  if (choiceKey === key) return;
+  choiceKey = key;
+  send({ type: 'choose', option });
+  for (const b of document.querySelectorAll('#menuCards button')) b.disabled = true;
 }
 
 function renderGame(state) {
   renderScore(state);
   $('hudMsg').textContent = state.message || '';
-  updateHitButton(state);
+  renderMenu(state);
 
   if (state.status === 'finished') {
     const sc = state.score;
@@ -478,72 +492,26 @@ function renderGame(state) {
   }
 }
 
-// ------------------------------------------------------------ 摇杆与键盘
+// 击球结果的小字（显示在计分板下面）
+function showShotLog(ev) {
+  const seat = S.state && S.state.seats[ev.seat];
+  const who = seat ? (seat.userId === S.me.id ? '你' : seat.name) : '';
+  const res = { ok: '', winner: '（直接得分）', fail: ev.fail === 'net' ? '（下网）' : ev.fail === 'out' ? '（出界）' : '' }[ev.result] || '';
+  $('shotLog').textContent = `${who}：${ev.name}${res}`;
+}
 
-const joy = $('joy');
-const knob = $('knob');
-function moveKnob(e) {
-  const rect = joy.getBoundingClientRect();
-  const R = rect.width / 2;
-  let dx = e.clientX - (rect.left + R);
-  let dy = e.clientY - (rect.top + R);
-  const mag = Math.hypot(dx, dy);
-  if (mag > R) { dx *= R / mag; dy *= R / mag; }
-  knob.style.transform = `translate(${dx}px, ${dy}px)`;
-  S.stick.r = dx / R;
-  S.stick.f = -dy / R;   // 摇杆向上 = 朝对面
-}
-let joyActive = false;   // 手指正在摇杆上
-function resetKnob() {
-  joyActive = false;
-  knob.style.transform = '';
-  S.stick.f = 0;
-  S.stick.r = 0;
-}
-joy.addEventListener('pointerdown', (e) => { joyActive = true; joy.setPointerCapture(e.pointerId); moveKnob(e); });
-joy.addEventListener('pointermove', (e) => { if (joy.hasPointerCapture(e.pointerId)) moveKnob(e); });
-joy.addEventListener('pointerup', resetKnob);
-joy.addEventListener('pointercancel', resetKnob);
+// ------------------------------------------------------------ 键盘
 
-const keysDown = new Set();
-function keyStick() {
-  const f = (keysDown.has('KeyW') || keysDown.has('ArrowUp') ? 1 : 0) - (keysDown.has('KeyS') || keysDown.has('ArrowDown') ? 1 : 0);
-  const r = (keysDown.has('KeyD') || keysDown.has('ArrowRight') ? 1 : 0) - (keysDown.has('KeyA') || keysDown.has('ArrowLeft') ? 1 : 0);
-  return { f, r };
-}
 window.addEventListener('keydown', (e) => {
-  if (S.view !== 'game') return;
+  if (S.view !== 'game' || e.repeat) return;
   if (e.target && e.target.tagName === 'INPUT') return;
-  if (e.repeat) return;
-  keysDown.add(e.code);
   const n = Number(e.key);
-  if (n >= 1 && n <= 5) selectStroke(STROKE_KEYS[n - 1]);
-  if (e.code === 'Space' || e.code === 'KeyJ') { e.preventDefault(); hitNow(); }
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+  if (n >= 1 && n <= 3) {
+    const btns = document.querySelectorAll('#menuCards button:not([disabled])');
+    if (btns[n - 1]) btns[n - 1].click();
+  }
 });
-window.addEventListener('keyup', (e) => keysDown.delete(e.code));
 
-// 键盘控制摇杆（手指按着触屏摇杆时，以摇杆为准）
-setInterval(() => {
-  if (S.view !== 'game') return;
-  if (!joyActive) {
-    const k = keyStick();
-    S.stick.f = k.f;
-    S.stick.r = k.r;
-  }
-  // 每 50 毫秒把摇杆方向发给服务器（有变化或者不为零时）
-  const { f, r } = S.stick;
-  if (f !== S.sent.f || r !== S.sent.r || f || r) {
-    send({ type: 'stick', f: round2(f), r: round2(r) });
-    S.sent = { f, r };
-  }
-}, 50);
-function round2(v) { return Math.round(v * 100) / 100; }
-
-for (const b of document.querySelectorAll('#strokes button')) {
-  b.addEventListener('click', () => selectStroke(b.dataset.stroke));
-}
-$('hitBtn').addEventListener('click', hitNow);
 $('exitBtn').addEventListener('click', leaveRoom);
 $('overLeaveBtn').addEventListener('click', leaveRoom);
 $('againBtn').addEventListener('click', () => send({ type: 'restart' }));
@@ -587,13 +555,15 @@ function onMessage(m) {
       S.state = m;
       S.room = m.room;
       applyState(m);
+      for (const ev of m.events) {
+        if (ev.type === 'shot') { showShotLog(ev); choiceKey = null; }   // 新的一次击球：选项要重新给
+      }
       if (m.status === 'waiting') {
         if (S.view !== 'room') showView('room');
         renderRoom(m);
       } else {
         if (S.view !== 'game') { showView('game'); }
         renderGame(m);
-        renderStrokes();
       }
       return;
     }
@@ -621,7 +591,6 @@ async function boot() {
   $('createBtn').disabled = S.isGuest;
   $('createBtn').title = S.isGuest ? '注册账号后才能建房' : '';
   showView('lobby');
-  renderStrokes();
   connect();
 }
 boot();
