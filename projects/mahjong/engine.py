@@ -87,7 +87,7 @@ class Round:
             c[kind] += 1
         if not R.is_win(c, len(self.melds[seat])):
             return None
-        fan, items, pattern = R.score_win(c, self.melds[seat], self_draw, self.opened[seat])
+        fan, items, pattern = R.score_win(c, self.melds[seat], self_draw, self.opened[seat], kind)
         if self_draw or pattern >= 2 or self.opened[seat]:
             return {"fan": fan, "points": 2 ** fan, "items": items, "hand": R.expand(c)}
         return None
@@ -117,9 +117,6 @@ class Round:
         c = self.hands[seat]
         if self._can_win(seat, None, True):
             opts.append({"action": "hu", "kind": None})
-        for k in range(R.KINDS):
-            if c[k] == 4:
-                opts.append({"action": "gang_an", "kind": k})
         for m in self.melds[seat]:
             if m["type"] == "pong" and c[m["kind"]] > 0:
                 opts.append({"action": "gang_jia", "kind": m["kind"]})
@@ -235,16 +232,13 @@ class Round:
             return
         if not any(o["action"] == action and o["kind"] == kind for o in opts):
             raise GameError("现在不能这样杠")
-        if action == "gang_an":
-            self.hands[seat][kind] -= 4
-            self.melds[seat].append({"type": "gang_an", "kind": kind, "from": None})
-        else:                                # gang_jia：碰升级成杠
-            self.hands[seat][kind] -= 1
-            for m in self.melds[seat]:
-                if m["type"] == "pong" and m["kind"] == kind:
-                    m["type"] = "gang_jia"
-                    break
-        for o in range(N_PLAYERS):           # 暗杠、加杠：其余每家付 1 分
+        # 只有碰后加杠（4 张）。暗杠不允许：四张一样的牌要留在手里做四归一
+        self.hands[seat][kind] -= 1
+        for m in self.melds[seat]:
+            if m["type"] == "pong" and m["kind"] == kind:
+                m["type"] = "gang_jia"
+                break
+        for o in range(N_PLAYERS):           # 加杠：其余每家付 1 分
             if o != seat:
                 self.gang_pay[o] -= 1
                 self.gang_pay[seat] += 1
@@ -302,6 +296,7 @@ class Match:
         self.dealer = 0
         self.scores = [0] * N_PLAYERS
         self.round: Optional[Round] = None
+        self.history: List[dict] = []      # 每局的结果，给计分板回顾用
 
     def begin_round(self) -> Round:
         self.round_no += 1
@@ -317,6 +312,16 @@ class Match:
         for i, d in enumerate(r.result["deltas"]):
             self.scores[i] += d
         winners = [w["seat"] for w in r.result["winners"]]
+        self.history.append({
+            "round": self.round_no,
+            "dealer": self.dealer,
+            "suits": r.suits,
+            "type": r.result["type"],
+            "from": r.result.get("from"),
+            "winners": r.result["winners"],
+            "deltas": r.result["deltas"],
+            "revealed": r.result.get("revealed", []),
+        })
         # 庄家和牌或流局就连庄，否则下家坐庄
         if r.result["type"] == "win" and self.dealer not in winners:
             self.dealer = (self.dealer + 1) % N_PLAYERS
