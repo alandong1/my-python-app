@@ -3,8 +3,10 @@
 只管规则，不管网络和时间：服务器和电脑玩家都调用这里的方法。
 出错的操作会抛出 GameError，并且不改变牌局状态。
 
+卡五星的特点：每局只用两门数牌（万、条、筒里随机选两门）加中发白，
+所以一局一共 2 × 36 + 12 = 84 张牌，没有第三门数牌，也就不需要定缺。
+
 一局的阶段（Round.phase）：
-  ding     定缺：每人选一门缺门（万、条、筒），缺门的牌必须先打光才能和牌
   discard  轮到 Round.turn 这家：摸了牌（drawn=True）可以自摸、杠，然后打一张；也可以明牌
   claim    刚有人打出一张牌，其他家可以胡、碰、杠，等大家都表态后才结算
   over     这一局结束，结果在 Round.result 里
@@ -12,7 +14,6 @@
 和牌规则：
   - 至少两番才能和。屁胡（只有基本的 1 番）只能靠自摸和牌；
     如果这家已经明牌，屁胡也可以让别人点炮。
-  - 手里还有缺门的牌，不能和。
 """
 from __future__ import annotations
 
@@ -31,18 +32,20 @@ class GameError(Exception):
 class Round:
     def __init__(self, dealer: int, rng: Optional[random.Random] = None):
         rng = rng or random.Random()
-        self.wall: List[int] = [k for k in range(R.KINDS) for _ in range(R.COPIES)]
+        # 本局用哪两门数牌（0 万 1 条 2 筒），第三门这一局不出现
+        self.suits: List[int] = sorted(rng.sample([0, 1, 2], 2))
+        kinds = [k for s in self.suits for k in range(s * 9, s * 9 + 9)] + [27, 28, 29]
+        self.wall: List[int] = [k for k in kinds for _ in range(R.COPIES)]
         rng.shuffle(self.wall)
         self.dealer = dealer
         self.hands: List[List[int]] = [R.counts_of([]) for _ in range(N_PLAYERS)]   # 暗牌计数
         self.melds: List[List[dict]] = [[] for _ in range(N_PLAYERS)]              # 明牌
         self.discards: List[List[int]] = [[] for _ in range(N_PLAYERS)]            # 牌河
-        self.missing: List[Optional[int]] = [None] * N_PLAYERS                     # 缺门（0 万 1 条 2 筒）
         self.opened: List[bool] = [False] * N_PLAYERS                              # 是否明牌
         self.gang_pay = [0] * N_PLAYERS    # 杠分：这一局里杠牌带来的输赢
         self.turn = dealer
         self.drawn = False                 # 当前玩家刚摸了牌（手里多一张）
-        self.phase = "ding"
+        self.phase = "discard"
         self.pending: Dict[int, List[str]] = {}   # claim 阶段：谁能胡碰杠
         self.responses: Dict[int, str] = {}
         self.last: Optional[tuple] = None         # (座位, 牌种)：最近打出的牌
@@ -52,24 +55,7 @@ class Round:
         for _ in range(13):                       # 每家 13 张
             for s in range(N_PLAYERS):
                 self.hands[s][self.wall.pop()] += 1
-        self._draw_for(dealer)                    # 庄家多摸一张
-        self.phase = "ding"                       # 先定缺，定完才开始出牌
-
-    # ------------------------------------------------------------ 定缺
-
-    def pending_ding(self) -> List[int]:
-        return [s for s in range(N_PLAYERS) if self.missing[s] is None]
-
-    def choose_missing(self, seat: int, suit: int) -> None:
-        if self.phase != "ding":
-            raise GameError("现在不是定缺的时候")
-        if self.missing[seat] is not None:
-            raise GameError("你已经定过缺了")
-        if suit not in (0, 1, 2):
-            raise GameError("缺门只能选万、条或筒")
-        self.missing[seat] = suit
-        if not self.pending_ding():
-            self.phase = "discard"
+        self._draw_for(dealer)                    # 庄家多摸一张，直接开始出牌
 
     # ------------------------------------------------------------ 摸牌与轮转
 
@@ -89,12 +75,6 @@ class Round:
 
     # ------------------------------------------------------------ 查询
 
-    def _has_missing(self, c: List[int], seat: int) -> bool:
-        m = self.missing[seat]
-        if m is None:
-            return False
-        return any(c[k] for k in range(R.KINDS) if R.suit_of(k) == m)
-
     def _can_win(self, seat: int, kind: Optional[int], self_draw: bool) -> Optional[dict]:
         """seat 能不能和牌。kind 是别人打出的那张（点炮时），自摸时为 None。
 
@@ -104,8 +84,6 @@ class Round:
         if kind is not None:
             c[kind] += 1
         if not R.is_win(c, len(self.melds[seat])):
-            return None
-        if self._has_missing(c, seat):
             return None
         fan, items, base = R.score_win(c, self.melds[seat], self_draw)
         if self_draw or base >= 2 or (base == 1 and self.opened[seat]):
@@ -125,7 +103,7 @@ class Round:
         if self._can_win(seat, None, True):
             opts.append({"action": "hu", "kind": None})
         for k in range(R.KINDS):
-            if c[k] == 4 and R.suit_of(k) != self.missing[seat]:
+            if c[k] == 4:
                 opts.append({"action": "gang_an", "kind": k})
         for m in self.melds[seat]:
             if m["type"] == "pong" and c[m["kind"]] > 0:
@@ -162,7 +140,7 @@ class Round:
             self._next_turn()
 
     def _claims_for(self, src: int, kind: int) -> Dict[int, List[str]]:
-        """别人打出 kind 后，每家能做的操作。缺门的牌不能碰和杠。"""
+        """别人打出 kind 后，每家能做的操作。"""
         out: Dict[int, List[str]] = {}
         for t in range(N_PLAYERS):
             if t == src:
@@ -170,12 +148,11 @@ class Round:
             acts: List[str] = []
             if self._can_win(t, kind, False):
                 acts.append("hu")
-            if R.suit_of(kind) != self.missing[t]:
-                c = self.hands[t]
-                if c[kind] >= 3:
-                    acts.append("gang_ming")
-                if c[kind] >= 2:
-                    acts.append("pong")
+            c = self.hands[t]
+            if c[kind] >= 3:
+                acts.append("gang_ming")
+            if c[kind] >= 2:
+                acts.append("pong")
             if acts:
                 out[t] = acts
         return out

@@ -8,7 +8,6 @@
   const HONOR_NAMES = ['中', '发', '白'];
   const HONOR_CLASS = ['zhong', 'fa', 'bai'];
   const ACTION_LABEL = { hu: '胡', pong: '碰', gang_ming: '明杠', pass: '过' };
-  const MISSING_CLASS = ['missing-wan', 'missing-tiao', 'missing-tong'];
   const BASE = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
   const NAME_KEY = 'mahjong.name';
 
@@ -159,7 +158,8 @@
   function renderTable() {
     const r = view.round;
     const me = view.you;
-    $('info').textContent = `第 ${view.roundNo} 局 / 共 ${view.rounds} 局 · 庄家：${seatName(view.dealer)} · 牌墙剩 ${r.wall} 张`;
+    const suitText = r.suits.map((s) => SUIT_NAMES[s]).join('、');
+    $('info').textContent = `第 ${view.roundNo} 局 / 共 ${view.rounds} 局 · 本局 ${suitText} + 中发白 · 庄家：${seatName(view.dealer)} · 牌墙剩 ${r.wall} 张`;
     if (!canDiscard()) selectedKind = -1;
 
     // 三人：自己在下方，下家在右，上家在左
@@ -177,9 +177,6 @@
     const r = view.round;
     const frag = [];
     if (view.dealer === i) frag.push(el('span', 'tag dealer', '庄'));
-    if (r.missing[i] !== null && r.missing[i] !== undefined) {
-      frag.push(el('span', `tag ${MISSING_CLASS[r.missing[i]]}`, `缺${SUIT_NAMES[r.missing[i]]}`));
-    }
     if (r.opened[i]) frag.push(el('span', 'tag open', '明牌'));
     return frag;
   }
@@ -260,7 +257,7 @@
       c.append(el('div', 'muted', `${seatName(r.last[0])} 打出`));
       c.append(tileEl(r.last[1]));
     } else {
-      c.append(el('div', 'muted', r.phase === 'ding' ? '定缺阶段' : '牌局开始'));
+      c.append(el('div', 'muted', '牌局开始'));
     }
   }
 
@@ -274,14 +271,6 @@
     const r = view.round;
     const bar = $('actions');
     bar.replaceChildren();
-    if (r.phase === 'ding') {
-      if (r.missing[view.you] === null || r.missing[view.you] === undefined) {
-        for (let s = 0; s < 3; s++) {
-          bar.append(btn(`定缺${SUIT_NAMES[s]}`, '', () => send({ type: 'ding', suit: s })));
-        }
-      }
-      return;
-    }
     if (r.phase === 'discard' && r.turn === view.you) {
       for (const o of r.self) {
         if (o.action === 'hu') {
@@ -304,12 +293,7 @@
   function renderHint() {
     const r = view.round;
     let text = '';
-    if (r.phase === 'ding') {
-      const mine = r.missing[view.you];
-      text = (mine === null || mine === undefined)
-        ? '请选一门缺门：缺门的牌要先打光，才能和牌（20 秒内不选，自动替你选）'
-        : '已定缺，等待其他人…';
-    } else if (r.phase === 'discard') {
+    if (r.phase === 'discard') {
       if (r.turn === view.you) {
         text = selectedKind >= 0 ? '再点一次这张牌，就打出去' : '轮到你出牌：点一张牌选中，再点一次打出';
       } else if (view.seats[r.turn] && view.seats[r.turn].bot) {
