@@ -79,7 +79,7 @@
 
   // 条子：按标准排法摆竹子；一条是一只孔雀
   const BAMBOO_LAYOUT = {
-    2: { w: 16, h: 80, pos: [[36, 70], [64, 70]] },
+    2: { w: 16, h: 40, pos: [[50, 46], [50, 96]] },   // 上面一竖、下面一竖
     3: { w: 16, h: 46, pos: [[50, 40], [34, 100], [66, 100]] },
     4: { w: 16, h: 46, pos: [[34, 44], [66, 44], [34, 100], [66, 100]] },
     5: { w: 15, h: 44, pos: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]], reds: [2] },
@@ -206,11 +206,7 @@
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }
 
-  function nameValue() {
-    const v = $('name').value.trim().slice(0, 12) || '玩家';
-    try { localStorage.setItem(NAME_KEY, v); } catch (e) { /* 隐私模式下可能不能存，忽略 */ }
-    return v;
-  }
+  let targeting = null;   // 摸牌前选目标：{ item: 'swap' | 'lucky_pong' | 'miracle_hu' }
 
   function seatName(i) {
     const s = view && view.seats[i];
@@ -255,6 +251,7 @@
   function leave() {
     closeSocket();
     view = null;
+    targeting = null;
     render();
   }
 
@@ -262,6 +259,7 @@
 
   function render() {
     const lobby = !view;
+    if (lobby) loadLobby();
     const room = !!view && view.state === 'waiting';
     const table = !!view && !room;
     $('lobby').classList.toggle('hidden', !lobby);
@@ -279,6 +277,7 @@
 
   function renderRoom() {
     $('room-code').textContent = view.code;
+    $('room-vis').textContent = view.visibility === 'public' ? '（公开）' : '（私密）';
     const list = $('room-seats');
     list.replaceChildren();
     view.seats.forEach((s, i) => {
@@ -293,6 +292,9 @@
     $('btn-start').textContent = view.isHost ? '开始游戏' : '等待房主开始';
     $('rounds').value = String(view.rounds);
     $('rounds').disabled = !view.isHost;
+    $('visibility').value = view.visibility;
+    $('visibility').disabled = !view.isHost;
+    $('items').disabled = !view.isHost;
   }
 
   // ------------------------------------------------------------ 牌桌
@@ -349,9 +351,18 @@
     if (r.melds[i].length) frag.append(melds);
 
     const disc = el('div', 'tiles small discards');
+    const pickingDiscard = targeting && (targeting.item === 'lucky_pong' || targeting.item === 'miracle_hu')
+      && r.phase === 'predraw' && r.turn === view.you;
     r.discards[i].forEach((k, idx) => {
       const t = tileEl(k, { small: true });
       if (r.last && r.last[0] === i && idx === r.discards[i].length - 1) t.classList.add('last');
+      if (pickingDiscard) {
+        t.classList.add('clickable');
+        t.onclick = () => {
+          send({ type: 'predraw', action: 'item', item: targeting.item, kind: k, src: i });
+          targeting = null;
+        };
+      }
       disc.append(t);
     });
     frag.append(disc);
@@ -359,9 +370,16 @@
     if (isMe) {
       const hand = el('div', 'tiles hand hand-wrap');
       const clickable = canDiscard();
+      const swapping = targeting && targeting.item === 'swap' && r.phase === 'predraw' && r.turn === view.you;
       r.hand.forEach((k) => {
         const t = tileEl(k);
-        if (clickable) {
+        if (swapping) {
+          t.classList.add('clickable');
+          t.onclick = () => {
+            send({ type: 'predraw', action: 'item', item: 'swap', kind: k });
+            targeting = null;
+          };
+        } else if (clickable) {
           t.classList.add('clickable');
           if (k === selectedKind) t.classList.add('selected');
           t.onclick = () => onTileClick(k);
@@ -418,6 +436,18 @@
     const r = view.round;
     const bar = $('actions');
     bar.replaceChildren();
+    if (r.phase === 'predraw' && r.turn === view.you) {
+      bar.append(btn('直接摸牌', '', () => { targeting = null; send({ type: 'predraw', action: 'skip' }); }));
+      for (const o of r.predraw) {
+        if (o.action !== 'item') continue;
+        const active = targeting && targeting.item === o.item;
+        bar.append(btn(`${o.name}${active ? '（选择中）' : ''}`, 'item', () => {
+          targeting = active ? null : { item: o.item };
+          renderTable();
+        }));
+      }
+      return;
+    }
     if (r.phase === 'discard' && r.turn === view.you) {
       for (const o of r.self) {
         if (o.action === 'hu') {
@@ -440,7 +470,15 @@
   function renderHint() {
     const r = view.round;
     let text = '';
-    if (r.phase === 'discard') {
+    if (r.phase === 'predraw') {
+      if (r.turn === view.you) {
+        if (targeting && targeting.item === 'swap') text = '偷天换日：点你手上一张要换出去的牌';
+        else if (targeting) text = `${ITEM_LABEL[targeting.item]}：点一张已经打出的牌`;
+        else text = '摸牌前：可以用一个道具，或者直接摸牌';
+      } else {
+        text = `${seatName(r.turn)} 摸牌前…`;
+      }
+    } else if (r.phase === 'discard') {
       if (r.turn === view.you) {
         text = selectedKind >= 0 ? '再点一次这张牌，就打出去' : '轮到你出牌：点一张牌选中，再点一次打出';
       } else if (view.seats[r.turn] && view.seats[r.turn].bot) {
@@ -552,23 +590,92 @@
     card.append(row);
   }
 
+  // ------------------------------------------------------------ 大厅数据（积分、商城、排行榜）
+
+  let lobbyData = null;
+  const ITEM_LABEL = { swap: '偷天换日', lucky_pong: '锦上添花', miracle_hu: '妙手回春' };
+
+  async function loadLobby() {
+    let data;
+    try {
+      const r = await fetch(BASE + 'api/lobby', { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(String(r.status));
+      data = await r.json();
+    } catch (e) {
+      $('me').textContent = '请先登录（游客也可以）后再进入。';
+      return;
+    }
+    lobbyData = data;
+    $('me').textContent = `${data.me.name} · 积分 ${data.me.points}`;
+    $('resume-box').classList.toggle('hidden', !data.myRoom);
+
+    const items = $('me');
+    const owned = Object.entries(data.shop).map(([k, v]) => `${v.name} ×${data.me.items[k] || 0}`).join('，');
+    items.append(el('div', 'muted', `道具：${owned}`));
+
+    const shop = $('shop');
+    shop.replaceChildren();
+    for (const [k, v] of Object.entries(data.shop)) {
+      shop.append(btn(`购买${v.name}（${v.price} 积分）`, '', () => buyItem(k)));
+    }
+
+    const pub = $('public-rooms');
+    pub.replaceChildren();
+    if (!data.rooms.length) pub.append(el('li', 'muted', '暂时没有公开的房间。'));
+    for (const r of data.rooms) {
+      const li = el('li');
+      li.append(el('span', null, `${r.host} 的房间 · ${r.seats}/3 人 · ${r.rounds} 局${r.items ? ' · 有道具' : ''}`));
+      li.append(btn('加入', '', () => connect({ type: 'join', code: r.code })));
+      pub.append(li);
+    }
+
+    const board = $('leaderboard');
+    board.replaceChildren();
+    if (!data.leaderboard.length) board.append(el('li', 'muted', '还没有积分记录。'));
+    for (const row of data.leaderboard) {
+      board.append(el('li', null, `${row.name}：${row.points} 分`));
+    }
+  }
+
+  async function buyItem(item) {
+    try {
+      const r = await fetch(BASE + 'api/shop/buy', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item }),
+      });
+      const data = await r.json();
+      toast(data.ok ? '购买成功' : data.text);
+    } catch (e) {
+      toast('购买失败，请稍后再试');
+    }
+    loadLobby();
+  }
+
   // ------------------------------------------------------------ 按钮
 
-  $('btn-solo').onclick = () => connect({ type: 'solo', name: nameValue(), rounds: Number($('rounds-lobby').value) });
-  $('btn-create').onclick = () => connect({ type: 'create', name: nameValue(), rounds: Number($('rounds-lobby').value) });
+  function visibilityValue() { return $('visibility-lobby').value; }
+
+  $('btn-solo').onclick = () => connect({
+    type: 'solo', rounds: Number($('rounds-lobby').value), items: $('items-lobby').checked,
+  });
+  $('btn-create').onclick = () => connect({
+    type: 'create', rounds: Number($('rounds-lobby').value), visibility: visibilityValue(),
+  });
   $('btn-join').onclick = () => {
-    const code = $('code').value.trim().toUpperCase();
-    if (!code) return toast('请输入房间号');
-    connect({ type: 'join', code, name: nameValue() });
+    const code = $('code').value.trim();
+    if (!/^\d{4}$/.test(code)) return toast('请输入四位房间号');
+    connect({ type: 'join', code });
   };
-  $('btn-start').onclick = () => send({ type: 'start' });
+  $('btn-resume').onclick = () => {
+    if (lobbyData && lobbyData.myRoom) connect({ type: 'resume', code: lobbyData.myRoom });
+  };
+  $('btn-start').onclick = () => send({ type: 'start', items: $('items').checked });
   $('rounds').onchange = () => send({ type: 'rounds', rounds: Number($('rounds').value) });
+  $('visibility').onchange = () => send({ type: 'visibility', visibility: $('visibility').value });
   $('btn-leave').onclick = leave;
   $('btn-quit').onclick = leave;
 
-  try {
-    const saved = localStorage.getItem(NAME_KEY);
-    if (saved) $('name').value = saved;
-  } catch (e) { /* 忽略 */ }
   render();
 })();

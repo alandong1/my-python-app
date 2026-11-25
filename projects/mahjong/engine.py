@@ -29,9 +29,13 @@ class GameError(Exception):
     """玩家的操作不合规则。"""
 
 
+ITEM_NAMES = {"swap": "偷天换日", "lucky_pong": "锦上添花", "miracle_hu": "妙手回春"}
+
+
 class Round:
-    def __init__(self, dealer: int, rng: Optional[random.Random] = None):
+    def __init__(self, dealer: int, rng: Optional[random.Random] = None, items: Optional[dict] = None):
         rng = rng or random.Random()
+        self.rng = rng
         # 本局用哪两门数牌（0 万 1 条 2 筒），第三门这一局不出现
         self.suits: List[int] = sorted(rng.sample([0, 1, 2], 2))
         kinds = [k for s in self.suits for k in range(s * 9, s * 9 + 9)] + [27, 28, 29]
@@ -51,11 +55,16 @@ class Round:
         self.last: Optional[tuple] = None         # (座位, 牌种)：最近打出的牌
         self.result: Optional[dict] = None
         self.recorded = False                     # 结果是否已经计入整场比赛
+        # 道具：房主开启后，每个人在自己回合摸牌前可以用一个道具
+        items = items or {}
+        self.items_enabled = bool(items.get("enabled"))
+        stock = items.get("stock") or []
+        self.stock: List[Dict[str, int]] = [dict(stock[s]) if s < len(stock) else {} for s in range(N_PLAYERS)]
 
         for _ in range(13):                       # 每家 13 张
             for s in range(N_PLAYERS):
                 self.hands[s][self.wall.pop()] += 1
-        self._draw_for(dealer)                    # 庄家多摸一张，直接开始出牌
+        self._start_turn(dealer)                  # 庄家：有道具就先进入摸牌前，否则直接摸牌
 
     # ------------------------------------------------------------ 摸牌与轮转
 
@@ -71,7 +80,83 @@ class Round:
 
     def _next_turn(self) -> None:
         self.drawn = False
-        self._draw_for((self.turn + 1) % N_PLAYERS)
+        self._start_turn((self.turn + 1) % N_PLAYERS)
+
+    def _start_turn(self, seat: int) -> None:
+        """轮到 seat 的回合开始：有道具就停在「摸牌前」，让他决定用不用；否则直接摸牌。"""
+        if self.items_enabled and sum(self.stock[seat].values()) > 0:
+            self.turn = seat
+            self.drawn = False
+            self.phase = "predraw"
+        else:
+            self._draw_for(seat)
+
+    def predraw_options(self, seat: int) -> List[dict]:
+        """摸牌前能做的事：跳过（直接摸牌）或用一个道具。"""
+        if self.phase != "predraw" or seat != self.turn:
+            return []
+        opts = [{"action": "skip", "kind": None, "item": None}]
+        for k, n in self.stock[seat].items():
+            if n > 0 and k in ITEM_NAMES:
+                opts.append({"action": "item", "kind": None, "item": k, "name": ITEM_NAMES[k]})
+        return opts
+
+    def act_predraw(self, seat: int, action: str, item: Optional[str] = None,
+                    kind: Optional[int] = None, src: Optional[int] = None) -> None:
+        """摸牌前的操作。action 是 skip（直接摸牌）或 item（用道具）。
+
+        偷天换日：kind 是手里要换出去的牌，从牌墙随机换一张，然后照常摸牌。
+        锦上添花：从 src 的牌河里取 kind 作为碰，然后直接打牌（不摸牌）。
+        妙手回春：从 src 的牌河里取 kind 和牌，算自摸。
+        """
+        if self.phase != "predraw" or seat != self.turn:
+            raise GameError("现在不能用道具")
+        if action == "skip":
+            self._draw_for(seat)
+            return
+        if action != "item" or item not in ITEM_NAMES or self.stock[seat].get(item, 0) <= 0:
+            raise GameError("没有这个道具")
+        c = self.hands[seat]
+        if item == "swap":
+            if kind is None or c[kind] <= 0:
+                raise GameError("请选手里的一张牌")
+            if not self.wall:
+                raise GameError("牌墙已经没有牌了")
+            idx = self.rng.randrange(len(self.wall))
+            tile = self.wall[idx]
+            self.wall[idx] = kind
+            c[kind] -= 1
+            c[tile] += 1
+            self.stock[seat][item] -= 1
+            self._draw_for(seat)
+            return
+        # 锦上添花、妙手回春：要从某家的牌河里取一张
+        if src is None or kind is None or kind not in self.discards[src]:
+            raise GameError("请选一张已经打出的牌")
+        if item == "lucky_pong":
+            if src == seat or c[kind] < 2:
+                raise GameError("只能选别人打出的、和自己已经凑成对子的牌")
+            self._take_discard(src, kind)
+            c[kind] -= 2
+            self.melds[seat].append({"type": "pong", "kind": kind, "from": src})
+            self.stock[seat][item] -= 1
+            self.last = None
+            self.turn = seat
+            self.phase = "discard"               # 碰之后直接打牌，不摸牌
+            self.drawn = False
+            return
+        # miracle_hu
+        if self._can_win(seat, kind, True) is None:
+            raise GameError("这张牌不能让你和牌")
+        self._take_discard(src, kind)
+        self.stock[seat][item] -= 1
+        self._win_self(seat, kind)
+
+    def _take_discard(self, src: int, kind: int) -> None:
+        """从 src 的牌河里拿走最后一张 kind。"""
+        pile = self.discards[src]
+        idx = len(pile) - 1 - pile[::-1].index(kind)
+        del pile[idx]
 
     # ------------------------------------------------------------ 查询
 
@@ -198,7 +283,7 @@ class Round:
 
     def _meld(self, t: int, action: str, src: int, kind: int) -> None:
         """t 碰或明杠 src 打出的牌。"""
-        self.discards[src].pop()
+        self._take_discard(src, kind)
         c = self.hands[t]
         if action == "pong":
             c[kind] -= 2
@@ -258,8 +343,8 @@ class Round:
                             "items": info["items"], "hand": info["hand"], "selfDraw": False})
         self._end("win", winners, src, deltas)
 
-    def _win_self(self, seat: int) -> None:
-        info = self._can_win(seat, None, True)
+    def _win_self(self, seat: int, win_kind: Optional[int] = None) -> None:
+        info = self._can_win(seat, win_kind, True)
         deltas = list(self.gang_pay)
         for o in range(N_PLAYERS):
             if o != seat:
@@ -298,16 +383,16 @@ class Match:
         self.round: Optional[Round] = None
         self.history: List[dict] = []      # 每局的结果，给计分板回顾用
 
-    def begin_round(self) -> Round:
+    def begin_round(self, items: Optional[dict] = None) -> Round:
         self.round_no += 1
-        self.round = Round(self.dealer, self.rng)
+        self.round = Round(self.dealer, self.rng, items)
         return self.round
 
-    def record(self) -> None:
-        """一局结束后调用一次：计入分数，决定下一局庄家。"""
+    def record(self) -> bool:
+        """一局结束后调用一次：计入分数，决定下一局庄家。返回这次是否真的记录了（只记一次）。"""
         r = self.round
         if r.recorded or r.phase != "over":
-            return
+            return False
         r.recorded = True
         for i, d in enumerate(r.result["deltas"]):
             self.scores[i] += d
@@ -325,6 +410,7 @@ class Match:
         # 庄家和牌或流局就连庄，否则下家坐庄
         if r.result["type"] == "win" and self.dealer not in winners:
             self.dealer = (self.dealer + 1) % N_PLAYERS
+        return True
 
     @property
     def finished(self) -> bool:
