@@ -25,11 +25,16 @@ ITEMS: Dict[str, str] = {
     # 工具
     "stone_axe": "石斧", "stone_pick": "石镐", "hoe": "锄头", "spear": "鱼叉",
     "iron_axe": "铁斧", "iron_pick": "铁镐",
+    # 武器和防具
+    "wood_sword": "木剑", "iron_sword": "铁剑", "grass_armor": "草甲", "iron_armor": "铁甲",
     # 家具
     "bed": "床", "table": "桌子", "chair": "椅子", "chest": "箱子", "rug": "地毯", "lamp": "油灯",
 }
 
 TOOLS = ("stone_axe", "stone_pick", "hoe", "spear", "iron_axe", "iron_pick")
+# 武器：物品 → 攻击力；防具：物品 → 防御力。每人一个武器位、一个防具位。
+WEAPONS = {"wood_sword": {"name": "木剑", "attack": 4}, "iron_sword": {"name": "铁剑", "attack": 7}}
+ARMORS = {"grass_armor": {"name": "草甲", "defense": 2}, "iron_armor": {"name": "铁甲", "defense": 5}}
 FURNITURE = ("bed", "table", "chair", "chest", "rug", "lamp")
 SEEDS = ("carrot_seed", "potato_seed", "corn_seed")
 
@@ -73,7 +78,17 @@ BLOCKING = ("tree", "rock")
 ANIMALS = {
     "rabbit": ("兔子", 2, (3, 4), 0.6, True, 70),
     "crab": ("螃蟹", 1, (2,), 0.3, False, 25),
+    # 狼只在夜里出现（见 WOLF_NIGHT_COUNT），所以白天的目标数量是 0
+    "wolf": ("狼", 12, (3, 4), 0.8, False, 0),
 }
+
+# 狼：夜里的威胁
+WOLF_NIGHT_COUNT = 5      # 每个夜晚出现几只
+WOLF_AGGRO = 8.0          # 狼看到 8 格内、在室外的玩家就追
+WOLF_REACH = 1.6          # 离多近才能咬到
+WOLF_SPEED = 1.8          # 追人时的速度（格/秒）
+WOLF_DAMAGE = 4           # 一口咬掉多少血（防御会减少）
+WOLF_BITE_INTERVAL = 2.0  # 每隔几秒咬一口
 
 # ------------------------------------------------------------ 配方
 
@@ -94,6 +109,15 @@ RECIPES: Dict[str, dict] = {
     "spear": {"name": "鱼叉", "in": {"stick": 3, "stone": 1, "rope": 1}, "out": {"spear": 1},
               "station": "workbench", "level": 1},
     "rug": {"name": "地毯", "in": {"fiber": 6}, "out": {"rug": 1}, "station": "workbench", "level": 1},
+    # 武器和防具
+    "wood_sword": {"name": "木剑", "in": {"stick": 2, "wood": 3}, "out": {"wood_sword": 1},
+                   "station": "workbench", "level": 1},
+    "grass_armor": {"name": "草甲", "in": {"fiber": 8, "rope": 2}, "out": {"grass_armor": 1},
+                    "station": "workbench", "level": 1},
+    "iron_sword": {"name": "铁剑", "in": {"stick": 1, "iron_ingot": 2, "rope": 1}, "out": {"iron_sword": 1},
+                   "station": "workbench", "level": 2},
+    "iron_armor": {"name": "铁甲", "in": {"iron_ingot": 4, "rope": 2}, "out": {"iron_armor": 1},
+                   "station": "workbench", "level": 2},
     # 工作台 2 级
     "iron_axe": {"name": "铁斧", "in": {"stick": 2, "iron_ingot": 2, "rope": 1}, "out": {"iron_axe": 1},
                  "station": "workbench", "level": 2},

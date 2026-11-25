@@ -924,3 +924,103 @@ def test_yields_are_random_around_the_middle_value(g):
     vals = [g._roll(7, 2) for _ in range(800)]
     assert min(vals) == 5 and max(vals) == 9
     assert 6.7 < sum(vals) / len(vals) < 7.3
+
+
+# ------------------------------------------------------------ 第三阶段第二批：武器、防具、狼群
+
+def test_weapons_and_armor_recipes_and_equip(spot):
+    g, p, x, z = spot
+    p.inv = {"stick": 2, "wood": 9, "stone": 2}
+    build(g, p, "workbench")                           # 花掉 6 个木材
+    craft(g, p, "wood_sword")                          # 剩下的 3 个木材 + 2 根木棍
+    assert p.inv["wood_sword"] == 1
+    g.act(p, "equip", {"item": "wood_sword"})
+    assert p.equip == {"weapon": "wood_sword"}
+    g.act(p, "equip", {"item": "wood_sword"})          # 再点一次就脱下
+    assert p.equip == {}
+    assert p.inv["wood_sword"] == 1                    # 装备不消耗
+
+
+def test_cannot_equip_what_you_do_not_have(spot):
+    g, p, x, z = spot
+    with pytest.raises(GameError):
+        g.act(p, "equip", {"item": "iron_sword"})
+    with pytest.raises(GameError):
+        g.act(p, "equip", {"item": "wood"})
+
+
+def test_sword_kills_rabbit_in_one_hit(spot):
+    g, p, x, z = spot
+    p.inv = {"wood_sword": 1}
+    g.act(p, "equip", {"item": "wood_sword"})
+    rabbit = Animal(id=g._new_id(), kind="rabbit", x=x + 1.5, z=z + 0.5, hp=2)
+    g.animals.append(rabbit)
+    interact_and_wait(g, p)
+    assert rabbit not in g.animals
+
+
+def test_wolves_only_come_out_at_night(g):
+    g.time = 0.0                                       # 白天
+    g.tick()
+    assert not any(a.kind == "wolf" for a in g.animals)
+    g.time = 18 * 60 + 5                               # 夜里
+    g.tick()
+    assert sum(1 for a in g.animals if a.kind == "wolf") == C.WOLF_NIGHT_COUNT
+    g.time = 24 * 60 + 1                               # 天亮
+    g.tick()
+    assert not any(a.kind == "wolf" for a in g.animals)
+
+
+def test_wolf_bites_and_armor_reduces_the_damage(spot):
+    g, p, x, z = spot
+    g.time = 18 * 60 + 5
+    wolf = Animal(id=g._new_id(), kind="wolf", x=x + 1.2, z=z + 0.5, hp=12)
+    g.animals.append(wolf)
+    p.health = 100.0
+    g.tick()
+    assert p.health == pytest.approx(100 - C.WOLF_DAMAGE, abs=0.5)
+    p.health = 100.0
+    p.inv = {"iron_armor": 1}
+    g.equip(p, "iron_armor")
+    wolf.turn_at = 0.0
+    g.tick()
+    assert p.health == pytest.approx(100 - max(1, C.WOLF_DAMAGE - 5), abs=0.5)
+
+
+def test_campfire_light_keeps_wolves_out(spot):
+    g, p, x, z = spot
+    g.time = 18 * 60 + 5
+    fire = g._place_building("campfire", x - 3, z, level=2)
+    fire.fuel_until = g.time + 600
+    place(p, x - 2.5, z + 0.5)                          # 站在篝火旁边
+    wolf = Animal(id=g._new_id(), kind="wolf", x=x + 6.5, z=z + 0.5, hp=12)
+    g.animals.append(wolf)
+    p.health = 100.0
+    for _ in range(600):
+        g.tick()
+        assert not g._in_light(wolf.x, wolf.z)          # 狼从来没有进到光里
+    assert p.health == 100.0
+
+
+def test_house_is_safe_from_wolves(spot):
+    g, p, x, z = spot
+    g.time = 18 * 60 + 5
+    p.inv = {"wood": 20, "stone": 6, "rope": 2}
+    build(g, p, "house", fx=0.0, fz=1.0)
+    house = next(b for b in g.buildings.values() if b.kind == "house")
+    place(p, house.x + 1.5, house.z + 3.6)
+    g.act(p, "enter", {})
+    wolf = Animal(id=g._new_id(), kind="wolf", x=house.x + 1.5, z=house.z + 6.0, hp=12)
+    g.animals.append(wolf)
+    p.health = 100.0
+    for _ in range(50):
+        g.tick()
+    assert p.health == 100.0
+
+
+def test_wolf_night_state_is_saved(g):
+    g.time = 18 * 60 + 5
+    g.tick()
+    d = json.loads(json.dumps(g.to_dict()))
+    g2 = Game.from_dict(d)
+    assert g2.wolf_night is True
