@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>湖北卡五星</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <main id="app">
+    <!-- 大厅：输入昵称，选择建房、加入或和电脑玩 -->
+    <section id="lobby" class="panel">
+      <h1>🀄 湖北卡五星</h1>
+      <p class="muted">万条筒 108 张，碰、杠、胡，一炮可以多响。可以和朋友联机，也可以和电脑玩。</p>
+      <label class="field">昵称
+        <input id="name" maxlength="12" placeholder="玩家" autocomplete="nickname">
+      </label>
+      <label class="field">局数
+        <select id="rounds-lobby">
+          <option value="1">1 局</option>
+          <option value="4" selected>4 局</option>
+          <option value="8">8 局</option>
+        </select>
+      </label>
+      <div class="row">
+        <button id="btn-solo" class="primary">和电脑玩</button>
+        <button id="btn-create">创建房间（多人）</button>
+      </div>
+      <div class="row join">
+        <input id="code" maxlength="4" placeholder="房间号" autocapitalize="characters">
+        <button id="btn-join">加入房间</button>
+      </div>
+    </section>
+
+    <!-- 房间：等人、补位、开始 -->
+    <section id="room" class="panel hidden">
+      <h2>房间 <span id="room-code" class="code"></span></h2>
+      <p class="muted">把房间号发给朋友，他在大厅输入就能加入。没坐满的座位，开始时由电脑补上。</p>
+      <ul id="room-seats" class="seats-list"></ul>
+      <label class="field">局数
+        <select id="rounds">
+          <option value="1">1 局</option>
+          <option value="4">4 局</option>
+          <option value="8">8 局</option>
+        </select>
+      </label>
+      <div class="row">
+        <button id="btn-start" class="primary">开始游戏</button>
+        <button id="btn-leave">离开房间</button>
+      </div>
+    </section>
+
+    <!-- 牌桌 -->
+    <section id="table" class="hidden">
+      <div class="topbar">
+        <span id="info"></span>
+        <button id="btn-quit" class="small">离开</button>
+      </div>
+      <div class="board">
+        <div id="seat-top" class="seat"></div>
+        <div id="seat-left" class="seat side"></div>
+        <div id="center" class="center"></div>
+        <div id="seat-right" class="seat side"></div>
+        <div id="seat-bottom" class="seat me"></div>
+      </div>
+      <div id="actions" class="actions"></div>
+      <p id="hint" class="hint"></p>
+      <!-- 计分板：每一局的胡牌牌型，点开可以回顾 -->
+      <details id="scoreboard" class="scoreboard">
+        <summary>计分板（每局的牌型，点开看详情）</summary>
+        <div id="score-list"></div>
+      </details>
+    </section>
+
+    <!-- 一局结束 / 整场结束 -->
+    <div id="overlay" class="overlay hidden">
+      <div class="card" id="overlay-card"></div>
+    </div>
+  </main>
+  <div id="toast" class="toast hidden"></div>
+  <script src="static/game.js"></script>
+</body>
+</html>
