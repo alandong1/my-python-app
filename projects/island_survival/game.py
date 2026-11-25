@@ -74,6 +74,7 @@ class Player:
     ox: float = 0.0          # 进屋前在室外的位置，出屋时回到这里
     oz: float = 0.0
     work: Optional[dict] = None   # 正在做的事（砍树、采集……）：进度条走完才成功；不保存进存档
+    equip: Dict[str, str] = field(default_factory=dict)   # 装备：{"weapon": 物品, "armor": 物品}
 
 
 @dataclass
@@ -122,7 +123,7 @@ def _player_to_dict(p: Player) -> dict:
         "account_id": p.account_id, "name": p.name, "role": p.role,
         "x": p.x, "z": p.z, "hunger": p.hunger, "health": p.health, "sanity": p.sanity,
         "sick": p.sick, "dead": p.dead, "inv": dict(p.inv), "house": p.house,
-        "ox": p.ox, "oz": p.oz,
+        "ox": p.ox, "oz": p.oz, "equip": dict(p.equip),
     }
 
 
@@ -133,6 +134,7 @@ def _player_from_dict(d: dict, pid: int) -> Player:
         sanity=float(d["sanity"]), sick=bool(d["sick"]), dead=bool(d["dead"]),
         inv={str(k): int(v) for k, v in d["inv"].items()},
         house=d.get("house"), ox=float(d.get("ox", 0)), oz=float(d.get("oz", 0)),
+        equip={str(k): str(v) for k, v in d.get("equip", {}).items()},
     )
 
 
@@ -153,6 +155,7 @@ class Game:
         self.animals: List[Animal] = []
         self.players: Dict[int, Player] = {}
         self.saved: Dict[int, dict] = {}         # 下线玩家的角色：账户编号 → 数据
+        self.wolf_night = False                  # 这个夜晚的狼已经出来了没有
         self._next_id = 1
         self._generate_map()
         self._populate()
@@ -306,6 +309,8 @@ class Game:
             return
         p.hunger, p.health, p.sanity = 100.0, 100.0, 100.0
         p.sick, p.dead, p.inv = False, False, {}
+        p.equip = {}
+        p.work = None
         p.move_x = p.move_z = 0.0
         p.house = None
         p.x, p.z = self._spawn_point(exclude=p)
@@ -353,6 +358,7 @@ class Game:
             "place": lambda: self.place(p, str(payload.get("item", "")), fx, fz),
             "use": lambda: self.use(p, str(payload.get("item", ""))),
             "heal": lambda: self.heal(p),
+            "equip": lambda: self.equip(p, str(payload.get("item", ""))),
         }
         fn = handlers.get(action)
         if fn is None:
@@ -492,7 +498,7 @@ class Game:
 
     def _hit_animal(self, p: Player, a: Animal) -> None:
         name = C.ANIMALS[a.kind][0]
-        damage = 2 if p.inv.get("spear", 0) > 0 else 1
+        damage = max(self._attack(p), 2 if p.inv.get("spear", 0) > 0 else 1)
         a.hp -= damage
         if a.hp > 0:
             self._msg(p, f"攻击了{name}")
@@ -865,6 +871,31 @@ class Game:
         else:
             self._msg(p, f"吃了{C.ITEMS[item]}：饱食 +{hunger}")
 
+    def equip(self, p: Player, item: str) -> None:
+        """穿上或脱下武器、防具（再点一次就脱下）。装备不会消耗。"""
+        if item in C.WEAPONS:
+            slot = "weapon"
+        elif item in C.ARMORS:
+            slot = "armor"
+        else:
+            raise GameError("这个东西不能装备")
+        if p.inv.get(item, 0) < 1:
+            raise GameError(f"背包里没有{C.ITEMS[item]}")
+        if p.equip.get(slot) == item:
+            del p.equip[slot]
+            self._msg(p, f"卸下了{C.ITEMS[item]}")
+        else:
+            p.equip[slot] = item
+            self._msg(p, f"装备了{C.ITEMS[item]}")
+
+    def _attack(self, p: Player) -> int:
+        w = p.equip.get("weapon")
+        return C.WEAPONS[w]["attack"] if w else 0
+
+    def _defense(self, p: Player) -> int:
+        a = p.equip.get("armor")
+        return C.ARMORS[a]["defense"] if a else 0
+
     def heal(self, p: Player) -> None:
         if p.role != "doctor":
             raise GameError("只有医生会治疗队友")
@@ -898,6 +929,14 @@ class Game:
                     self.tree_at[r.z * W + r.x] = r.id
                 elif r.kind == "rock":
                     self.rock_at[r.z * W + r.x] = r.id
+        night = self.clock()["night"]
+        if night and not self.wolf_night:
+            self.wolf_night = True
+            for _ in range(C.WOLF_NIGHT_COUNT):
+                self._spawn_animal("wolf")
+        elif not night and self.wolf_night:
+            self.wolf_night = False
+            self.animals = [a for a in self.animals if a.kind != "wolf"]
         self._update_animals()
         alive = [p for p in self.players.values() if not p.dead]
         for p in alive:
@@ -983,10 +1022,44 @@ class Game:
                 if self._dist(pr, q.x, q.z) <= PRIEST_RANGE:
                     q.sanity = min(100.0, q.sanity + PRIEST_GAIN * DT)
 
+    def _in_light(self, x: float, z: float) -> bool:
+        """这个位置在不在某个亮着的篝火的照亮范围里。"""
+        return any(b.kind == "campfire" and b.fuel_until > self.time
+                   and math.hypot(x - (b.x + 0.5), z - (b.z + 0.5)) <= C.LIGHT_RADIUS[b.level]
+                   for b in self.buildings.values())
+
+    def _wolf_bite(self, a: Animal, q: "Player") -> None:
+        dmg = max(1, C.WOLF_DAMAGE - self._defense(q))
+        q.health -= dmg
+        self._msg(q, f"被狼咬了一口，损失 {dmg} 点健康")
+
+    def _wolf_step(self, a: Animal) -> bool:
+        """狼的一步。返回 True 表示这一步已经处理（追人或咬人），False 表示让它正常闲逛。"""
+        targets = [q for q in self.players.values() if not q.dead and q.house is None]
+        near = min(targets, key=lambda q: math.hypot(q.x - a.x, q.z - a.z), default=None)
+        if near is None:
+            return False
+        d = math.hypot(near.x - a.x, near.z - a.z)
+        if d > C.WOLF_AGGRO:
+            return False
+        if d <= C.WOLF_REACH:
+            if self.time >= a.turn_at:
+                a.turn_at = self.time + C.WOLF_BITE_INTERVAL
+                self._wolf_bite(a, near)
+            return True
+        a.heading = math.atan2(near.z - a.z, near.x - a.x)
+        step = C.WOLF_SPEED * DT
+        nx, nz = a.x + math.cos(a.heading) * step, a.z + math.sin(a.heading) * step
+        if self._animal_ok(nx, nz, C.ANIMALS["wolf"][2]) and not self._in_light(nx, nz):
+            a.x, a.z = nx, nz
+        return True
+
     def _update_animals(self) -> None:
         outdoor = [p for p in self.players.values() if not p.dead and p.house is None]
         for a in self.animals:
             name, _, kinds, speed, flee, _ = C.ANIMALS[a.kind]
+            if a.kind == "wolf" and self._wolf_step(a):
+                continue
             near = None
             hunted = any(p.work and a.id in p.work.get("targets", []) for p in self.players.values())
             if flee and outdoor and not hunted:
@@ -1003,10 +1076,11 @@ class Game:
                 step = speed * DT
             nx = a.x + math.cos(a.heading) * step
             nz = a.z + math.sin(a.heading) * step
-            if self._animal_ok(nx, nz, kinds):
+            wolf_blocked = a.kind == "wolf" and self._in_light(nx, nz)
+            if self._animal_ok(nx, nz, kinds) and not wolf_blocked:
                 a.x, a.z = nx, nz
             else:
-                a.heading += math.pi      # 撞墙了就掉头
+                a.heading += math.pi      # 撞墙了、或者碰到篝火的光，就掉头
                 a.turn_at = self.time + 1
 
     def _animal_ok(self, x: float, z: float, kinds: Tuple[int, ...]) -> bool:
@@ -1040,6 +1114,7 @@ class Game:
             "buildings": [[b.id, b.kind, b.x, b.z, b.level, b.owner, b.fuel_until, b.crop, b.planted_at,
                            b.furniture] for b in self.buildings.values()],
             "saved": {str(k): v for k, v in saved.items()},
+            "wolf_night": self.wolf_night,
         }
 
     @classmethod
@@ -1065,6 +1140,7 @@ class Game:
                 for dx in range(size_of(kind)):
                     g.build_at[(z + dz) * W + (x + dx)] = b.id
         g.saved = {int(k): v for k, v in d["saved"].items()}
+        g.wolf_night = bool(d.get("wolf_night", False))
         return g
 
     # ------------------------------------------------------------ 发给客户端的数据
@@ -1090,6 +1166,8 @@ class Game:
             "lightRadius": {str(k): v for k, v in C.LIGHT_RADIUS.items()},
             "furniture": list(C.FURNITURE),
             "tools": list(C.TOOLS),
+            "weapons": list(C.WEAPONS),
+            "armors": list(C.ARMORS),
         }
 
     def view(self, p: Player, with_resources: bool) -> Dict:
@@ -1110,7 +1188,7 @@ class Game:
                 "hunger": round(p.hunger, 1), "health": round(p.health, 1),
                 "sanity": round(p.sanity, 1), "sick": p.sick, "dead": p.dead,
                 "inv": {k: v for k, v in p.inv.items() if v > 0},
-                "events": msgs, "house": p.house,
+                "events": msgs, "house": p.house, "equip": dict(p.equip),
             },
             "players": [[q.id, q.name, q.role, round(q.x, 2), round(q.z, 2), q.dead, q.sick,
                          q.work["kind"] if q.work else ""]

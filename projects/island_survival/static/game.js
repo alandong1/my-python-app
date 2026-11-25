@@ -180,6 +180,10 @@ function initScene() {
   shared.rabbitMat = new THREE.MeshStandardMaterial({ color: '#c9b49a', roughness: 0.9 });
   shared.crab = new THREE.SphereGeometry(0.22, 10, 8);
   shared.crabMat = new THREE.MeshStandardMaterial({ color: '#d9573a', roughness: 0.6 });
+  shared.wolf = new THREE.SphereGeometry(0.4, 10, 8);
+  shared.wolfMat = new THREE.MeshStandardMaterial({ color: '#6e6a66', roughness: 0.9 });
+  shared.snout = new THREE.BoxGeometry(0.22, 0.18, 0.3);
+  shared.ear = new THREE.ConeGeometry(0.09, 0.22, 4);
   shared.flame = new THREE.ConeGeometry(0.2, 0.6, 6);
   shared.flameMat = new THREE.MeshBasicMaterial({ color: '#ff9a2e' });
   shared.ring = new THREE.RingGeometry(0.4, 0.5, 24);
@@ -202,6 +206,7 @@ function initScene() {
   shared.axeHead = new THREE.BoxGeometry(0.22, 0.16, 0.06);
   shared.pickHead = new THREE.BoxGeometry(0.34, 0.07, 0.07);
   shared.spearShaft = new THREE.BoxGeometry(0.05, 1.5, 0.05);
+  shared.swordBlade = new THREE.BoxGeometry(0.08, 0.6, 0.03);
   shared.metal = new THREE.MeshStandardMaterial({ color: '#9aa3ab', roughness: 0.4, metalness: 0.6 });
 }
 
@@ -441,7 +446,22 @@ function makeResource(kind, id) {
 
 function makeAnimal(kind) {
   const g = new THREE.Group();
-  if (kind === 'rabbit') {
+  if (kind === 'wolf') {
+    const body = new THREE.Mesh(shared.wolf, shared.wolfMat);
+    body.scale.set(0.8, 0.7, 1.6);
+    body.position.y = 0.45;
+    const head = new THREE.Mesh(shared.wolf, shared.wolfMat);
+    head.scale.setScalar(0.45);
+    head.position.set(0, 0.7, 0.75);
+    const snout = new THREE.Mesh(shared.snout, shared.wolfMat);
+    snout.position.set(0, 0.62, 1.0);
+    g.add(body, head, snout);
+    for (const x of [-0.12, 0.12]) {                          // 耳朵
+      const ear = new THREE.Mesh(shared.ear, shared.wolfMat);
+      ear.position.set(x, 1.0, 0.72);
+      g.add(ear);
+    }
+  } else if (kind === 'rabbit') {
     const body = new THREE.Mesh(shared.rabbit, shared.rabbitMat);
     body.scale.set(1, 0.8, 1.3);
     body.position.y = 0.25;
@@ -473,6 +493,7 @@ function makePlayer(p) {
   hand.position.y = -0.3;
   arm.add(hand);
   const tools = {
+    sword: toolMesh([shared.swordBlade, 0, -0.62, 0.1], shared.wood, shared.metal),
     axe: toolMesh([shared.axeHead, 0, -0.62, 0.1], shared.wood, shared.metal),
     pick: toolMesh([shared.pickHead, 0, -0.62, 0.1], shared.wood, shared.metal),
     spear: toolMesh(null, shared.wood, shared.metal),
@@ -516,7 +537,7 @@ function toolMesh(headSpec, handleMat, headMat) {
 
 // 动作动画：根据别人（和自己）正在做的事，挥手、弯腰、刺
 const ARM_REST = 0;
-function animatePlayer(mesh, t, dt) {
+function animatePlayer(mesh, t, dt, hasWeapon = false) {
   const d = mesh.userData;
   if (!d.torso) return;
   const act = d.act || '';
@@ -524,7 +545,7 @@ function animatePlayer(mesh, t, dt) {
   const ease = Math.min(1, dt * 12);
   let armTarget = ARM_REST, torsoTarget = 0;
   const tools = d.tools;
-  const show = { axe: false, pick: false, spear: false };
+  const show = { sword: false, axe: false, pick: false, spear: false };
   if (act === 'tree') {                       // 砍树：举起斧子，用力劈下
     const s = (Math.sin(t * 5 + ph) + 1) / 2;
     armTarget = -1.9 + 1.9 * s;
@@ -545,6 +566,7 @@ function animatePlayer(mesh, t, dt) {
   d.swing += (armTarget - d.swing) * ease;
   d.arm.rotation.x = d.swing;
   d.torso.rotation.x += (torsoTarget - d.torso.rotation.x) * ease;
+  if (hasWeapon && (act === '' || act === 'animal')) show.sword = true;
   for (const k of Object.keys(show)) tools[k].visible = show[k];
 }
 
@@ -689,6 +711,7 @@ function applyState(s) {
   }
   setBars(m);
   if (s.clock) setClock(s.clock);
+  $('gear').textContent = `武器：${m.equip && m.equip.weapon ? info.items[m.equip.weapon] : '无'} · 防具：${m.equip && m.equip.armor ? info.items[m.equip.armor] : '无'}`;
   setInventory(m.inv, house !== null);
   setLog(m.events);
   $('meName').textContent = m.name;
@@ -1021,6 +1044,13 @@ function setInventory(inv, inside) {
       btn.textContent = '放';
       btn.dataset.place = item;
       li.append(btn);
+    } else if (info.weapons.includes(item) || info.armors.includes(item)) {
+      const on = Object.values(me.equip || {}).includes(item);
+      li.append(document.createTextNode(on ? '（装备中）' : ''));
+      const btn = document.createElement('button');
+      btn.textContent = on ? '卸下' : '装备';
+      btn.dataset.equip = item;
+      li.append(btn);
     }
     ul.append(li);
   }
@@ -1245,6 +1275,7 @@ function setupInput() {
     const d = e.target.dataset || {};
     if (d.use) send({ type: 'action', action: 'use', item: d.use });
     if (d.place) act('place', { item: d.place });
+    if (d.equip) send({ type: 'action', action: 'equip', item: d.equip });
   });
   $('respawnBtn').addEventListener('click', () => send({ type: 'action', action: 'respawn' }));
 
@@ -1318,7 +1349,7 @@ function frame(now) {
     if (Math.abs(s.vx) + Math.abs(s.vz) > 1e-4) mesh.rotation.y = Math.atan2(s.vx, s.vz);
     const target = mesh.userData.dead ? Math.PI / 2 : 0;
     mesh.rotation.z += (target - mesh.rotation.z) * Math.min(1, dt * 10);
-    animatePlayer(mesh, t, dt);
+    animatePlayer(mesh, t, dt, mesh === players.get(myId) && !!(me.equip && me.equip.weapon));
   }
   for (const mesh of animals.values()) {
     const s = sampleAt(mesh, renderT);
