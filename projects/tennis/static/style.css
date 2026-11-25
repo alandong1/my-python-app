@@ -67,7 +67,7 @@ body.in-game #top { display: none; }
 #toast.show { opacity: 1; }
 
 /* ---------------- 比赛界面 ---------------- */
-#game { position: fixed; inset: 0; background: #000; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+#game { position: fixed; inset: 0; background: #000; overflow: hidden; user-select: none; -webkit-user-select: none; }
 #game[hidden] { display: none; }
 #view { position: absolute; inset: 0; }
 #view canvas { display: block; width: 100%; height: 100%; }
@@ -77,42 +77,42 @@ body.in-game #top { display: none; }
 }
 #scoreBoard b { font-size: 18px; }
 #hudMsg {
-  position: absolute; top: 64px; left: 50%; transform: translateX(-50%); color: #fff; background: rgba(0,0,0,.5);
+  position: absolute; top: 70px; left: 50%; transform: translateX(-50%); color: #fff; background: rgba(0,0,0,.5);
   padding: 6px 12px; border-radius: 8px; font-size: 14px; max-width: 90vw; text-align: center; pointer-events: none;
 }
 #hudMsg:empty { display: none; }
-.hint { position: absolute; top: 10px; left: 12px; color: rgba(255,255,255,.75); font-size: 12px; pointer-events: none; max-width: 40vw; }
-#joy {
-  position: absolute; left: 16px; bottom: 16px; width: 150px; height: 150px; border-radius: 50%;
-  background: rgba(255,255,255,.18); border: 2px solid rgba(255,255,255,.4); touch-action: none;
+#shotLog {
+  position: absolute; top: 112px; left: 50%; transform: translateX(-50%); color: #fff; background: rgba(0,0,0,.35);
+  padding: 4px 10px; border-radius: 8px; font-size: 13px; pointer-events: none;
 }
-#knob {
-  position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
-  background: rgba(255,255,255,.7); box-shadow: 0 2px 8px rgba(0,0,0,.3); pointer-events: none;
+#shotLog:empty { display: none; }
+#menu {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(760px, 94vw);
+  background: rgba(14,20,28,.82); color: #fff; border-radius: 14px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.2);
 }
-#strokes {
-  position: absolute; right: 14px; bottom: 16px; display: grid; gap: 6px; grid-template-columns: repeat(5, auto);
+#menu[hidden] { display: none; }
+.menu-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.menu-head b { font-size: 17px; }
+.menu-head .muted { color: #cfd8e3; font-size: 13px; }
+.menu-sub { color: #cfd8e3; font-size: 13px; margin: 4px 0 8px; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.cards:empty { display: none; }
+.choice {
+  display: grid; gap: 4px; text-align: left; padding: 10px 12px; border-radius: 10px;
+  background: #1f2b38; color: #fff; border: 1px solid rgba(255,255,255,.25); min-height: 92px;
 }
-#strokes button {
-  background: rgba(0,0,0,.55); color: #fff; border: 1px solid rgba(255,255,255,.35); padding: 6px 8px; font-size: 13px; min-width: 58px;
-}
-#strokes button.sel { background: #d4ff3a; color: #101010; border-color: #d4ff3a; font-weight: 700; }
-kbd { font-size: 11px; opacity: .7; margin-left: 4px; }
-#hitBtn {
-  position: absolute; right: 14px; bottom: 96px; width: 128px; height: 128px; border-radius: 50%;
-  background: rgba(0,0,0,.5); color: #fff; border: 3px solid rgba(255,255,255,.5); font-size: 20px; font-weight: 700;
-}
-#hitBtn.ready { background: #d4ff3a; color: #101010; border-color: #fff; box-shadow: 0 0 22px #d4ff3a; }
-#exitBtn { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,.5); color: #fff; border-color: rgba(255,255,255,.35); }
+.choice:hover:not(:disabled) { background: #2a3b4e; }
+.choice:disabled { opacity: .45; }
+.choice .num { font-size: 12px; color: #d4ff3a; font-weight: 700; }
+.choice .cname { font-size: 16px; font-weight: 700; }
+.choice .cdesc { font-size: 12px; color: #cfd8e3; }
+#exitBtn { position: absolute; left: 14px; top: 14px; background: rgba(0,0,0,.5); color: #fff; border-color: rgba(255,255,255,.35); }
 #over { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); padding: 16px; }
 #over[hidden] { display: none; }
 #over .card { background: var(--card); }
 
 @media (max-width: 700px) {
-  #strokes { grid-template-columns: repeat(3, auto); bottom: 170px; right: 10px; }
-  #hitBtn { bottom: 16px; right: 14px; width: 110px; height: 110px; }
-  #joy { width: 124px; height: 124px; left: 10px; bottom: 10px; }
-  #knob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
-  .hint { display: none; }
-  #exitBtn { top: auto; bottom: 150px; transform: none; left: 10px; }
+  .cards { grid-template-columns: 1fr; }
+  .choice { min-height: 0; }
+  #menu { bottom: 10px; }
 }

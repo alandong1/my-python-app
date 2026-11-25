@@ -133,13 +133,14 @@ def test_match_starts_when_full_and_only_host_can_start(client):
         hws.send_json({"type": "start"})
         state = expect(gws, "state")
         assert state["status"] == "playing"
-        assert state["phase"] == "serve_wait"
-        # 发球人抛球，正在上升的球要被服务器计算
+        assert state["phase"] == "serve_menu"
+        # 发球方从三个发球里选一个，服务器算成败，进入击球动画
         server_seat = state["serveSeat"]
         server_ws = hws if server_seat == 0 else gws
-        server_ws.send_json({"type": "stick", "f": 1, "r": 1})          # 发球时不能移动
-        server_ws.send_json({"type": "swing", "stroke": "top", "aimR": 0, "aimF": 0})
-        expect(server_ws, "state", where=lambda m: m["phase"] == "toss")
+        menu = state["menu"]
+        assert menu and len(menu["options"]) == 3
+        server_ws.send_json({"type": "choose", "option": menu["options"][0]["id"]})
+        expect(server_ws, "state", where=lambda m: m["phase"] == "animating")
 
 
 def test_guest_can_join_but_websocket_needs_login(client):

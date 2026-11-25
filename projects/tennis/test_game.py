@@ -1,111 +1,186 @@
-"""网球核心逻辑的测试：球的物理、计分规则、房间的座位和比赛流程。"""
+"""网球核心逻辑的测试：选项与局面、选择与成败、发球与失误、计分、房间座位、电脑。"""
 from __future__ import annotations
 
-import math
 import random
 
 import pytest
 
 from .game import (
-    BASE_SPEED, DRAG, G, REACH, STROKES, Ball, RoomError, Room,
-    Score, in_court, in_service_box, solve_launch, step_ball,
+    AI_ID, BEST_P, FALLBACK_P, MENU_TIME, OPTIONS, POOLS, POINT_PAUSE, SERVE_IDS, SHOT_TIME,
+    Room, RoomError, Score, tactical_best,
 )
 
 
-# ------------------------------------------------------------------ 球的物理
-
-def fly(ball: Ball, max_t: float = 6.0, dt: float = 1 / 480):
-    """让球一直飞，直到发生第一个事件。返回 (事件, 球的状态)。"""
-    t = 0.0
-    while t < max_t:
-        events = step_ball(ball, dt)
-        t += dt
-        if events:
-            return events[0], ball
-    return None, ball
+def make_room(mode="single", ai=False, seed=1):
+    room = Room(id="r", name="测试", mode=mode, host_id=1, host_name="房主", ai=ai)
+    room.rng.seed(seed)
+    if not ai:
+        for uid in range(2, 5 if mode == "double" else 3):
+            room.join(uid, f"u{uid}")
+    return room
 
 
-def test_solve_launch_lands_on_target_when_clear_of_net():
-    x0, y0, z0 = -10.0, 1.0, 0.0
-    vx, vy, vz = solve_launch(x0, y0, z0, 9.5, 2.0, BASE_SPEED, 1.1)
-    ball = Ball(x=x0, y=y0, z=z0, vx=vx, vy=vy, vz=vz)
-    event, ball = fly(ball)
-    assert event[0] == "bounce"
-    assert event[1] == pytest.approx(9.5, abs=0.4)
-    assert event[2] == pytest.approx(2.0, abs=0.4)
+def finish_animation(room: Room):
+    """把击球动画跑完（服务器每帧会做的事）。"""
+    room.tick(SHOT_TIME + 0.01)
 
 
-@pytest.mark.parametrize("stroke", list(STROKES))
-def test_every_stroke_clears_the_net(stroke):
-    """任何球种都不能下网：求解器要保证过网高度（上旋和下旋也一样）。"""
-    s = STROKES[stroke]
-    for y0 in (0.6, 1.0, 1.6):
-        ball = Ball(x=-9.0, y=y0, z=0.0)
-        ball.top, ball.side = s["top"], s["side"]
-        ball.vx, ball.vy, ball.vz = solve_launch(ball.x, ball.y, ball.z, 8.0, 0.0,
-                                                 BASE_SPEED * s["speed"], s["clear"], s["top"])
-        event, _ = fly(ball)
-        assert event is not None
-        assert event[0] != "net", (stroke, y0)
+def wait_for_menu(room: Room, phase=("menu", "serve_menu")):
+    for _ in range(int(60 / 0.1)):
+        if room.phase in phase:
+            return
+        room.tick(0.1)
+    raise AssertionError(f"没有进入 {phase}，现在是 {room.phase}")
 
 
-def test_ball_crossing_net_low_is_a_net_event():
-    ball = Ball(x=-0.5, y=0.3, z=0.0, vx=10.0, vy=0.0, vz=0.0)
-    event, _ = fly(ball, max_t=1.0)
-    assert event[0] == "net"
+def make_menu_for(room: Room, situation: str, opp_zone: str = "back"):
+    """直接给击球方一个指定局面的菜单（测试用）。"""
+    room._open_rally_menu(room.hitter if room.hitter is not None else 0, situation, opp_zone)
 
 
-def test_topspin_dips_more_than_flat():
-    """同样的击球速度，上旋的球落得比平击快（马格努斯效应）。"""
-    def land_x(top):
-        b = Ball(x=-10, y=1.0, z=0.0, vx=20.0, vy=3.0, vz=0.0, top=top)
-        event, b = fly(b)
-        return event[1]
-    assert land_x(1.0) < land_x(0.0)     # 上旋的落点更近（下沉更快）
-    assert land_x(-1.0) > land_x(0.0)    # 下旋飘得更远
+# ------------------------------------------------------------------ 选项与局面
+
+def test_tactical_best_matches_opponent_position():
+    assert tactical_best("deep", "net") == "lob"
+    assert tactical_best("deep", "back") == "drop"
+    assert tactical_best("deep", "mid") == "flat"
+    assert tactical_best("short", "back") == "volley"
+    assert tactical_best("lob", "net") == "smash"
 
 
-def test_side_spin_curves_the_ball_sideways():
-    def land_z(side):
-        b = Ball(x=-10, y=1.0, z=0.0, vx=20.0, vy=3.0, vz=0.0, side=side)
-        event, _ = fly(b)
-        return event[2]
-    assert land_z(1.0) != pytest.approx(land_z(0.0), abs=0.05)
-    assert land_z(1.0) * land_z(-1.0) < 0     # 左右两个方向相反
+@pytest.mark.parametrize("situation,opp", [("deep", "net"), ("deep", "back"), ("deep", "mid"),
+                                           ("short", "back"), ("lob", "mid")])
+def test_menu_has_three_options_and_the_best_one_is_among_them(situation, opp):
+    room = make_room()
+    room.start(1)
+    room.phase = "menu"
+    room._build_menu(situation, opp)
+    assert len(room.menu_options) == 3
+    assert len(set(room.menu_options)) == 3
+    assert all(o in POOLS[situation] for o in room.menu_options)
+    best = tactical_best(situation, opp)
+    if best is not None:
+        assert room.menu_best == best and room.menu_best in room.menu_options
+        assert room.menu_best_p == BEST_P
+    else:
+        assert room.menu_best in room.menu_options and room.menu_best_p == FALLBACK_P
 
 
-def test_bounce_loses_speed_and_rolls_to_a_stop():
-    b = Ball(x=0.0, y=0.5, z=0.0, vx=8.0, vy=-3.0, vz=0.0)
-    seen = []
-    for _ in range(4000):
-        for ev in step_ball(b, 1 / 240):
-            seen.append(ev[0])
-        if "stop" in seen:
-            break
-    assert seen[0] == "bounce"
-    assert "stop" in seen
+def test_serve_menu_offers_the_three_serves():
+    room = make_room()
+    room.start(1)
+    assert room.phase == "serve_menu"
+    assert sorted(room.menu_options) == sorted(SERVE_IDS)
 
 
-def test_drag_is_small_at_normal_rally_speed():
-    assert DRAG < 0.002
-    assert G == pytest.approx(9.8)
+# ------------------------------------------------------------------ 选择与结果
+
+def test_only_the_hitter_can_choose_and_only_offered_options():
+    room = make_room()
+    room.start(1)
+    server = room.seats[room.server_seat]
+    other = [s for s in room.seats if s is not server][0]
+    with pytest.raises(RoomError, match="现在不是你选择的时候"):
+        room.choose(other.user_id, room.menu_options[0])
+    with pytest.raises(RoomError, match="没有这个选项"):
+        room.choose(server.user_id, "smash")
 
 
-# ------------------------------------------------------------------ 场地判断
+def test_choosing_moves_the_hitter_to_the_option_zone():
+    room = make_room()
+    room.start(1)
+    server = room.seats[room.server_seat]
+    option = room.menu_options[0]
+    room.choose(server.user_id, option)
+    assert room.phase == "animating"
+    assert server.zone == OPTIONS[option]["zone"]
 
-def test_in_court_singles_and_doubles_lines():
-    assert in_court(5.0, 4.5, singles=False)
-    assert not in_court(5.0, 4.5, singles=True)      # 单打边线外
-    assert not in_court(12.5, 0.0, singles=False)    # 底线外
+
+def test_failed_shot_loses_the_point_for_the_hitter_after_animation():
+    room = make_room(seed=5)
+    room.start(1)
+    room.phase = "menu"                      # 直接进入一次对打（不是发球）
+    room.hitter = 0
+    room.menu_options = ["flat", "top", "slice"]
+    room.menu_best, room.menu_best_p = "flat", BEST_P
+    room.rng.random = lambda: 0.999          # 强制失败
+    room.choose(1, "flat")                   # 深球打出界
+    ev = [e for e in room.events if e["type"] == "shot"][-1]
+    assert ev["result"] == "fail" and ev["fail"] == "out"
+    assert room.score.points == [0, 0]       # 动画还没结束，还没得分
+    finish_animation(room)
+    assert room.phase == "point_over"
+    point = [e for e in room.events if e["type"] == "point"]
+    assert point and point[-1]["winner"] == 1      # 击球的是队 0，所以队 1 得分
 
 
-def test_service_box_must_be_diagonal_and_on_receiver_side():
-    # 发球方在 z>0 一侧（server_zside=1），必须落在对面 z<0 的发球区
-    assert in_service_box(3.0, -2.0, receiver_sign=1, server_zside=1)
-    assert not in_service_box(3.0, 2.0, receiver_sign=1, server_zside=1)   # 同一侧
-    assert not in_service_box(-3.0, -2.0, receiver_sign=1, server_zside=1)  # 接球方另一侧
-    assert not in_service_box(7.0, -2.0, receiver_sign=1, server_zside=1)  # 过了发球线
+def test_successful_shot_passes_the_ball_to_the_other_side():
+    room = make_room(seed=7)
+    room.start(1)
+    room.rng.random = lambda: 0.0            # 强制成功
+    server = room.seats[room.server_seat]
+    option = OPTIONS[room.menu_options[0]]
+    room.choose(server.user_id, room.menu_options[0])
+    finish_animation(room)
+    assert room.phase == "menu"
+    assert room.hitter is not None
+    receiver = room.seats[room.hitter]
+    assert receiver.team != server.team
+    assert room.menu_opp_zone == option["zone"]
 
+
+def test_winner_scores_immediately_for_the_hitter():
+    room = make_room(seed=9)
+    room.start(1)
+    room.phase = "menu"
+    room.hitter = 0
+    room.menu_options = ["volley", "drop", "lob"]
+    room.menu_best, room.menu_best_p = "volley", 1.0
+    room.rng.random = lambda: 0.0            # 成功，且直接得分（0 < WINNER_P）
+    room.choose(1, "volley")
+    finish_animation(room)
+    point = [e for e in room.events if e["type"] == "point"]
+    assert point and point[-1]["winner"] == 0 and "直接得分" in point[-1]["reason"]
+
+
+def test_first_serve_fault_gives_second_serve_then_double_fault_point():
+    room = make_room()
+    room.start(1)
+    server = room.seats[room.server_seat]
+    room.rng.random = lambda: 0.999          # 发球失误
+    room.choose(server.user_id, room.menu_options[0])
+    finish_animation(room)
+    assert room.phase == "serve_menu" and room.serve_attempt == 2
+    room.choose(server.user_id, room.menu_options[0])
+    finish_animation(room)
+    assert room.phase == "point_over"
+    point = [e for e in room.events if e["type"] == "point"]
+    assert point and point[-1]["winner"] == 1 - server.team and point[-1]["reason"] == "双发失误"
+
+
+def test_point_over_then_next_point_starts_with_a_serve_menu():
+    room = make_room()
+    room.start(1)
+    server = room.seats[room.server_seat]
+    room.rng.random = lambda: 0.999
+    room.choose(server.user_id, room.menu_options[0])
+    room.serve_attempt = 2                   # 直接按双发失误算
+    room.pending = (1 - server.team, "测试")
+    finish_animation(room)
+    assert room.phase == "point_over"
+    room.tick(POINT_PAUSE + 0.05)
+    assert room.phase == "serve_menu"
+
+
+def test_timeout_chooses_automatically_for_a_human():
+    room = make_room()
+    room.start(1)
+    room.tick(MENU_TIME + 0.1)               # 超过选择时限
+    assert room.phase == "animating"         # 自动选了一个，进入击球动画
+    assert [e for e in room.events if e["type"] == "shot"]
+
+
+# ------------------------------------------------------------------ 计分（规则保持不变）
 
 # ------------------------------------------------------------------ 计分
 
@@ -170,250 +245,108 @@ def test_cannot_score_after_match_end():
         s.win_point(0)
 
 
+
 # ------------------------------------------------------------------ 房间
 
-def make_room(mode="single", host=1):
-    return Room(id="r", name="测试", mode=mode, host_id=host, host_name="房主")
-
-
-def test_host_takes_seat_zero_when_room_is_created():
+def test_host_takes_seat_zero_and_first_come_first_served():
     room = make_room()
     assert room.seat_of(1).index == 0
-    assert room.player_count() == 1
-
-
-def test_first_come_first_served_and_full_room_rejects():
-    room = make_room("single")
-    room.join(2, "甲")
     with pytest.raises(RoomError, match="房间已满"):
-        room.join(3, "乙")
+        room.join(9, "多余的人")
 
 
 def test_doubles_seats_and_teams():
     room = make_room("double")
-    for uid in (2, 3, 4):
-        room.join(uid, f"u{uid}")
     assert [s.team for s in room.seats] == [0, 0, 1, 1]
-    assert room.player_count() == 4
 
 
 def test_cannot_start_before_full_and_only_host_can_start():
-    room = make_room("single")
+    room = Room(id="r", name="x", mode="single", host_id=1, host_name="a")
     with pytest.raises(RoomError):
         room.start(1)
     room.join(2, "甲")
     with pytest.raises(RoomError, match="房主"):
         room.start(2)
     room.start(1)
-    assert room.status == "playing" and room.phase == "serve_wait"
+    assert room.status == "playing"
 
 
 def test_cannot_join_running_match():
-    room = make_room("single")
-    room.join(2, "甲")
+    room = make_room()
     room.start(1)
     with pytest.raises(RoomError, match="进行中"):
-        room.join(3, "乙")
+        room.join(9, "乙")
 
 
-def test_leave_frees_the_seat():
-    room = make_room("single")
-    room.join(2, "甲")
-    room.leave(2)
-    assert room.seat_of(2) is None
-    room.join(3, "乙")
-    assert room.seat_of(3) is not None
-
-
-def test_only_server_can_toss_then_serve_with_correct_box():
-    room = make_room("single")
-    room.join(2, "甲")
-    room.start(1)
-    server = room.seats[room.server_seat]
-    other = [s for s in room.seats if s is not server][0]
-    with pytest.raises(RoomError, match="还没轮到你发球"):
-        room.swing(other.user_id, "flat")
-    room.swing(server.user_id, "flat")               # 抛球
-    assert room.phase == "toss"
-    # 等球到最高点附近再发球
-    for _ in range(200):
-        room.tick(1 / 30)
-        if room.ball.y >= 2.0 and room.ball.vy < 0:
-            break
-    room.swing(server.user_id, "top", 0.0, 0.0)
-    assert room.phase == "rally" and room.serve_pending
-    assert room.last_seat == server.index
-
-
-def test_server_cannot_move_during_serve():
-    room = make_room("single")
-    room.join(2, "甲")
-    room.start(1)
-    server = room.seats[room.server_seat]
-    x0 = server.x
-    room.set_stick(server.user_id, 1.0, 1.0)
-    room.tick(0.5)
-    assert server.x == pytest.approx(x0)
-
-
-def test_cannot_hit_twice_in_a_row():
-    room = make_room("single")
-    room.join(2, "甲")
-    room.start(1)
-    server = room.seats[room.server_seat]
-    room.swing(server.user_id, "flat")
-    for _ in range(200):
-        room.tick(1 / 30)
-        if room.ball.y >= 2.0 and room.ball.vy < 0:
-            break
-    room.swing(server.user_id, "flat")
-    server.cooldown = 0.0                 # 排除冷却的影响，只测「同一个人不能连续击球」
-    # 球刚发出去，发球人不能马上再击一次
-    room.ball.x = server.x
-    room.ball.y = 1.0
-    with pytest.raises(RoomError, match="连续"):
-        room.swing(server.user_id, "flat")
-
-
-def test_swing_out_of_reach_is_rejected():
-    room = make_room("single")
-    room.join(2, "甲")
-    room.start(1)
-    server = room.seats[room.server_seat]
-    room.swing(server.user_id, "flat")
-    room.tick(1 / 30)
-    room.phase = "rally"
-    room.last_seat = server.index
-    receiver = [s for s in room.seats if s is not server][0]
-    room.ball.x, room.ball.y, room.ball.z = receiver.x + 5.0, 1.0, receiver.z
-    receiver.cooldown = 0.0
-    with pytest.raises(RoomError, match="没够到"):
-        room.swing(receiver.user_id, "flat")
-
-
-def test_snapshot_contains_what_the_client_needs_and_clears_events():
-    room = make_room("single")
-    room.join(2, "甲")
-    room.start(1)
-    snap = room.snapshot()
-    for key in ("status", "phase", "message", "serveSeat", "score", "ball", "seats", "events"):
-        assert key in snap
-    assert snap["score"]["labels"] == ["0", "0"]
-    assert room.events == []
-    assert all(k in snap["ball"] for k in ("x", "y", "z", "top", "side"))
-
-
-def test_full_random_match_finishes_without_errors():
-    """跑一场随机的完整比赛：不能出错、一定能结束。"""
-    import random
-    rng = random.Random(7)
-    for mode in ("single", "double"):
-        room = make_room(mode)
-        for uid in range(2, 5 if mode == "double" else 3):
-            room.join(uid, f"u{uid}")
-        room.start(1)
-        for _ in range(60 * 60 * 3):       # 最多模拟 3 小时的比赛时间
-            room.tick(1 / 30)
-            if room.status == "finished":
-                break
-            if room.phase == "serve_wait":
-                srv = room.seats[room.server_seat]
-                room.swing(srv.user_id, "top")
-            elif room.phase == "toss" and room.ball.y > 2.0 and room.ball.vy < 0:
-                srv = room.seats[room.server_seat]
-                try:
-                    room.swing(srv.user_id, rng.choice(list(STROKES)), rng.uniform(-1, 1), rng.uniform(-1, 1))
-                except RoomError:
-                    pass
-            elif room.phase == "rally":
-                for s in room.seats:
-                    if s and s.index != room.last_seat and math.hypot(room.ball.x - s.x, room.ball.z - s.z) < REACH:
-                        try:
-                            room.swing(s.user_id, rng.choice(list(STROKES)), rng.uniform(-1, 1), rng.uniform(-1, 1))
-                        except RoomError:
-                            pass
-                    if s:
-                        target_x = room.ball.x
-                        target_z = room.ball.z
-                        room.set_stick(s.user_id,
-                                       max(-1, min(1, (target_x - s.x) * (1 if s.team == 0 else -1))),
-                                       max(-1, min(1, (target_z - s.z) * 0.8)))
-            room.events.clear()
-        assert room.score.total_games > 0
-
-
-# ------------------------------------------------------------------ 人机对战
+# ------------------------------------------------------------------ 电脑
 
 def make_ai_room(seed=1):
-    room = Room(id="ai", name="人机", mode="single", host_id=1, host_name="房主", ai=True)
-    room.rng.seed(seed)
-    return room
+    return make_room(ai=True, seed=seed)
 
 
 def test_ai_room_is_full_single_and_has_ai_seat():
     room = make_ai_room()
     assert room.player_count() == 2
     seat = room.ai_seat()
-    assert seat is not None and seat.is_ai and seat.team == 1 and seat.user_id == -1
+    assert seat is not None and seat.is_ai and seat.team == 1 and seat.user_id == AI_ID
     with pytest.raises(RoomError, match="只支持单打"):
         Room(id="x", name="x", mode="double", host_id=1, host_name="a", ai=True)
 
 
-def test_ai_is_full_so_host_can_start_immediately():
+def test_ai_chooses_by_itself_when_it_is_its_turn():
     room = make_ai_room()
     room.start(1)
-    assert room.status == "playing"
-
-
-def test_ai_serves_by_itself_when_it_is_its_turn():
-    room = make_ai_room()
-    room.start(1)
-    room.score.total_games = 1        # 第二局轮到 2 号位（电脑）发球
-    room._prepare_serve()
-    assert room.server_seat == room.ai_seat().index
-    hits = []
-    for _ in range(30 * 6):           # 6 秒游戏时间内，电脑应该完成抛球和发球
-        room.tick(1 / 30)
-        hits += [e for e in room.events if e["type"] == "hit"]
-        room.events.clear()
-        if hits:
+    room.score.total_games = 1
+    room._next_point()                       # 第二局轮到电脑发球
+    assert room.hitter == room.ai_seat().index
+    for _ in range(int(3 / 0.1)):
+        room.tick(0.1)
+        if any(e["type"] == "shot" and e["seat"] == room.ai_seat().index for e in room.events):
             break
-    assert hits and hits[0]["seat"] == room.ai_seat().index and hits[0]["serve"]
-    assert room.phase == "rally"
-
-
-def _human_plays(room, rng):
-    """测试用的「真人」：轮到自己发球时发球，对打时偶尔够得到就击球。"""
-    h = room.seat_of(1)
-    if room.phase == "serve_wait" and room.server_seat == h.index:
-        room.swing(1, "top")
-    elif room.phase == "toss" and room.server_seat == h.index and room.ball.vy < 0 and 1.8 <= room.ball.y <= 2.8:
-        try:
-            room.swing(1, "flat", 0.0, 0.0)
-        except RoomError:
-            pass
-    elif room.phase == "rally" and h.index != room.last_seat \
-            and math.hypot(room.ball.x - h.x, room.ball.z - h.z) < REACH and rng.random() < 0.7:
-        try:
-            room.swing(1, rng.choice(["flat", "top", "back"]), rng.uniform(-1, 1), 0.0)
-        except RoomError:
-            pass
+        room.events.clear()
+    assert any(e["type"] == "shot" and e["seat"] == room.ai_seat().index for e in room.events)
 
 
 def test_full_match_against_ai_finishes_and_both_sides_score():
     rng = random.Random(3)
     room = make_ai_room(seed=3)
     room.start(1)
-    ai_hits = 0
-    for _ in range(30 * 60 * 30):      # 最多 30 分钟的比赛时间
+    shots_ai = 0
+    for _ in range(30 * 60 * 30):             # 最多 30 分钟游戏时间
         room.tick(1 / 30)
-        _human_plays(room, rng)
+        if room.phase in ("menu", "serve_menu") and room.hitter == 0:
+            room.choose(1, rng.choice(room.menu_options))
         for e in room.events:
-            if e["type"] == "hit" and e["seat"] == room.ai_seat().index:
-                ai_hits += 1
+            if e["type"] == "shot" and e["seat"] == room.ai_seat().index:
+                shots_ai += 1
         room.events.clear()
         if room.status == "finished":
             break
     assert room.status == "finished"
-    assert ai_hits > 20                # 电脑确实在打球，不是站着不动
-    assert room.score.winner in (0, 1)
+    assert shots_ai > 20
+
+
+def test_full_random_doubles_match_finishes_without_errors():
+    rng = random.Random(7)
+    room = make_room("double", seed=7)
+    room.start(1)
+    for _ in range(30 * 60 * 30):
+        room.tick(1 / 30)
+        if room.phase in ("menu", "serve_menu") and room.hitter is not None:
+            seat = room.seats[room.hitter]
+            if not seat.is_ai:
+                room.choose(seat.user_id, rng.choice(room.menu_options))
+        room.events.clear()
+        if room.status == "finished":
+            break
+    assert room.status == "finished"
+
+
+def test_snapshot_has_menu_for_client_and_clears_events():
+    room = make_room()
+    room.start(1)
+    snap = room.snapshot()
+    for key in ("status", "phase", "message", "serveSeat", "hitter", "score", "menu", "seats", "events"):
+        assert key in snap
+    assert snap["menu"] and len(snap["menu"]["options"]) == 3
+    assert room.events == []

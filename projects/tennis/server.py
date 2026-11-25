@@ -236,13 +236,8 @@ async def _handle(ws: WebSocket, me: dict, msg: dict):
         room.restart(me["id"])
         await _send_room(room)
         await _broadcast_lobby()
-    elif kind == "stick":
-        room.set_stick(me["id"], msg.get("f", 0), msg.get("r", 0))
-    elif kind == "swing":
-        hint = room.swing(me["id"], str(msg.get("stroke", "")),
-                          msg.get("aimR", 0), msg.get("aimF", 0))
-        if hint:
-            await _send(ws, {"type": "error", "text": hint})
+    elif kind == "choose":
+        room.choose(me["id"], str(msg.get("option", "")))
 
 
 # ------------------------------------------------------------------ 比赛主循环
