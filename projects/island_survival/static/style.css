@@ -143,3 +143,40 @@ button:disabled { opacity: 0.5; cursor: default; }
 .tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
 .tabs .tab { background: var(--bar-bg); color: var(--ink); padding: 6px 12px; }
 .tabs .tab.on { background: var(--accent); color: #fff; }
+
+/* ---------- 状态：三个圆圈（图标 + 百分比），框框小一点 ---------- */
+#hud-left.hud { top: 10px; left: 10px; width: auto; padding: 6px 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.72); }
+.rings { display: flex; gap: 4px; align-items: center; }
+.ring { position: relative; width: 44px; height: 44px; }
+.ring svg { width: 44px; height: 44px; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 3.2; }
+.ring .track { stroke: rgba(0, 0, 0, 0.12); }
+.ring .fg { stroke-linecap: round; transition: stroke-dashoffset 0.3s; }
+#ringHunger { stroke: #e8913a; }
+#ringHealth { stroke: #d9453b; }
+#ringSanity { stroke: #8a64c9; }
+.ring .icon { position: absolute; left: 0; right: 0; top: 7px; text-align: center; font-size: 13px; line-height: 1; }
+.ring b { position: absolute; left: 0; right: 0; bottom: 5px; text-align: center; font-size: 9px; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--ink); }
+#hud-left .small { margin-top: 2px; }
+#hud-left .who { margin-top: 2px; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) #hud-left.hud { background: rgba(24, 32, 38, 0.72); }
+}
+.badge { font-size: 11px; padding: 0 4px; }
+
+/* ---------- 对话框：平时只显示一行，点一下展开 ---------- */
+#log { pointer-events: auto; cursor: pointer; max-height: none; overflow: hidden; width: 240px; }
+#log:empty { display: none; }
+#log:not(.open) p:not(:last-child) { display: none; }
+#log.open { max-height: 40vh; overflow: auto; }
+#log p { white-space: normal; }
+
+/* 状态栏要固定在左上角（之前的 card 样式不再用，这里补上位置） */
+#hud-left.hud { position: absolute; }
+.ring { width: 48px; height: 48px; }
+.ring svg { width: 48px; height: 48px; }
+.ring .icon { top: 6px; font-size: 14px; }
+.ring b { bottom: 4px; font-size: 10px; font-weight: 600; }
+/* 对话框平时只占一行，超出的省略 */
+#log:not(.open) p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

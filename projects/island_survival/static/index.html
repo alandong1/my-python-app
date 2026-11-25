@@ -44,15 +44,26 @@
   <section id="game" hidden>
     <canvas id="scene"></canvas>
 
-    <div id="hud-left" class="card">
-      <div class="who"><span id="roleName"></span> · <span id="meName"></span>
-        <span id="sickBadge" class="badge" hidden>生病了</span></div>
-      <div class="bar"><span>🍖 饱食</span><div><i id="barHunger"></i></div><b id="valHunger"></b></div>
-      <div class="bar"><span>❤️ 健康</span><div><i id="barHealth"></i></div><b id="valHealth"></b></div>
-      <div class="bar"><span>🧠 精神</span><div><i id="barSanity"></i></div><b id="valSanity"></b></div>
+    <div id="hud-left" class="hud">
+      <div class="rings">
+        <div class="ring">
+          <svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15"/><circle id="ringHunger" class="fg" cx="18" cy="18" r="15"/></svg>
+          <span class="icon">🍖</span><b id="valHunger"></b>
+        </div>
+        <div class="ring">
+          <svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15"/><circle id="ringHealth" class="fg" cx="18" cy="18" r="15"/></svg>
+          <span class="icon">❤️</span><b id="valHealth"></b>
+        </div>
+        <div class="ring">
+          <svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15"/><circle id="ringSanity" class="fg" cx="18" cy="18" r="15"/></svg>
+          <span class="icon">🧠</span><b id="valSanity"></b>
+        </div>
+        <span id="sickBadge" class="badge" hidden>🤒</span>
+      </div>
       <div id="clock" class="small"></div>
+      <div class="who small"><span id="roleName"></span> · <span id="meName"></span></div>
       <div id="gear" class="small"></div>
-      <div id="survivors" class="small"></div>
+      <div id="survivors" hidden></div>
     </div>
 
     <div id="hud-right" class="card">
@@ -60,7 +71,7 @@
       <ul id="inv" hidden></ul>
     </div>
 
-    <div id="log" class="card"></div>
+    <div id="log" class="card" title="点一下展开 / 收起"></div>
     <div id="toast" hidden></div>
 
     <div id="houseBar" class="card" hidden>🏠 在屋里 · 按 Q 出屋 · 按 E 拿回附近的家具</div>

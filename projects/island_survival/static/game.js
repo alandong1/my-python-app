@@ -642,14 +642,14 @@ function makeBuilding(kind, level, state) {
   } else if (kind === 'house') {
     const wallMat = level === 1 ? shared.wood : level === 2 ? shared.stone : shared.woodLight;
     const roofMat = level === 3 ? shared.roofBlue : shared.roofRed;
-    g.add(box(2.9, 1.6, 2.9, wallMat, 0, 0.8, 0));                      // 墙
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.4, 1.2, 4), roofMat);
+    g.add(box(3.9, 1.6, 3.9, wallMat, 0, 0.8, 0));                      // 墙（4×4）
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(3.0, 1.2, 4), roofMat);
     roof.rotation.y = Math.PI / 4;
     roof.position.y = 2.2;
     g.add(roof);
-    g.add(box(0.7, 1.0, 0.1, shared.wood, 0, 0.5, 1.5));                 // 门（朝向镜头这一侧）
-    g.add(box(0.5, 0.4, 0.1, shared.glow, -0.9, 1.0, 1.5));              // 窗
-    g.add(box(0.5, 0.4, 0.1, shared.glow, 0.9, 1.0, 1.5));
+    g.add(box(0.7, 1.0, 0.1, shared.wood, 0, 0.5, 2.0));                 // 门（朝向镜头这一侧）
+    g.add(box(0.5, 0.4, 0.1, shared.glow, -1.2, 1.0, 2.0));              // 窗
+    g.add(box(0.5, 0.4, 0.1, shared.glow, 1.2, 1.0, 2.0));
   } else if (kind === 'plot') {
     g.add(box(0.95, 0.12, 0.95, shared.soil, 0, 0.02, 0));
     if (state && state !== 'empty') {
@@ -1011,14 +1011,18 @@ function setClock(c) {
   $('clock').textContent = `第 ${c.day} 天 · ${c.night ? '夜晚' : '白天'} · ${c.night ? '天亮还有' : '距离夜晚'}约 ${mins} 分钟`;
 }
 
+// 三个圆圈：圈里的图标 + 百分比。圈的缺口表示还剩多少。
+const RING_LEN = 2 * Math.PI * 15;     // 圆的周长（和 index.html 里的 r=15 对应）
 function setBars(m) {
-  const bar = (name, v) => {
-    $('bar' + name).style.width = Math.max(0, Math.min(100, v)) + '%';
-    $('val' + name).textContent = Math.round(v);
+  const ring = (id, v) => {
+    const pct = Math.max(0, Math.min(100, Math.round(v)));
+    $(id).style.strokeDasharray = RING_LEN;
+    $(id).style.strokeDashoffset = RING_LEN * (1 - pct / 100);
+    $('val' + id.slice(4)).textContent = pct + '%';
   };
-  bar('Hunger', m.hunger);
-  bar('Health', m.health);
-  bar('Sanity', m.sanity);
+  ring('ringHunger', m.hunger);
+  ring('ringHealth', m.health);
+  ring('ringSanity', m.sanity);
   $('sickBadge').hidden = !m.sick;
 }
 
@@ -1070,13 +1074,19 @@ function setInventory(inv, inside) {
   }
 }
 
+// 对话框：平时只显示最新的一行，点一下展开看全部（最近 30 条）
+const logLines = [];
 function setLog(events) {
-  for (const text of events || []) {
+  if (!events || !events.length) return;
+  logLines.push(...events);
+  while (logLines.length > 30) logLines.shift();
+  const box = $('log');
+  box.replaceChildren(...logLines.map((text) => {
     const p = document.createElement('p');
     p.textContent = text;
-    $('log').append(p);
-  }
-  while ($('log').children.length > 6) $('log').firstChild.remove();
+    return p;
+  }));
+  box.scrollTop = box.scrollHeight;
 }
 
 function toast(text) {
@@ -1277,6 +1287,7 @@ function setupInput() {
     b.addEventListener('click', () => buttons[b.dataset.action]?.());
   });
   $('interactBtn').addEventListener('click', interactClick);
+  $('log').addEventListener('click', () => $('log').classList.toggle('open'));
   $('menuClose').addEventListener('click', closeMenu);
   $('menu').addEventListener('click', (e) => { if (e.target.id === 'menu') closeMenu(); });
 
