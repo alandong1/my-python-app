@@ -40,17 +40,12 @@ def test_solo_game_plays_a_full_round_to_the_end(client):
     with client.websocket_connect("/apps/mahjong/ws") as ws:
         ws.send_json({"type": "solo", "name": "测试", "rounds": 1})
         state = None
-        dinged = False
         for _ in range(4000):
             state = next_state(ws)
             if state["state"] in ("round_end", "match_end"):
                 break
             rnd = state["round"]
-            if rnd["phase"] == "ding":
-                if not dinged:
-                    ws.send_json({"type": "ding", "suit": 0})
-                    dinged = True
-            elif rnd["phase"] == "discard" and rnd["turn"] == state["you"]:
+            if rnd["phase"] == "discard" and rnd["turn"] == state["you"]:
                 hu = [o for o in rnd["self"] if o["action"] == "hu"]
                 if hu:
                     ws.send_json({"type": "self", "action": "hu"})

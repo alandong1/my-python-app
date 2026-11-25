@@ -19,7 +19,6 @@ from . import rules as R
 from .engine import N_PLAYERS, GameError, Match
 
 BOT_DELAY = 0.8          # 电脑出牌前停一下，让玩家看清楚刚发生了什么
-DING_TIMEOUT = 20        # 真人定缺的时间（秒），超时由电脑替他选
 DISCARD_TIMEOUT = 60     # 真人出牌的时间（秒），超时由电脑代打
 CLAIM_TIMEOUT = 25       # 真人决定碰、杠、胡的时间（秒），超时自动「过」
 NEXT_ROUND_DELAY = 6     # 一局结束后多久开下一局
@@ -126,13 +125,11 @@ class Room:
                 self.start(pid)
             elif kind == "rounds":
                 self.set_rounds(pid, msg.get("rounds"))
-            elif kind in ("ding", "discard", "self", "claim"):
+            elif kind in ("discard", "self", "claim"):
                 if seat is None or self.match is None:
                     raise GameError("你不在牌局里")
                 r = self.match.round
-                if kind == "ding":
-                    r.choose_missing(seat, int(msg.get("suit")))
-                elif kind == "discard":
+                if kind == "discard":
                     r.discard(seat, int(msg.get("kind")))
                 elif kind == "self":
                     r.act_self(seat, str(msg.get("action")), msg.get("kind"))
@@ -168,13 +165,6 @@ class Room:
         if r.phase == "over":
             if not self.match.finished:
                 asyncio.ensure_future(self._next_round(v))
-            return
-        if r.phase == "ding":
-            waiting = r.pending_ding()
-            if any(self.seats[s].bot for s in waiting):
-                asyncio.ensure_future(self._bot_turn(v))
-            if any(not self.seats[s].bot for s in waiting):
-                asyncio.ensure_future(self._human_timeout(v, DING_TIMEOUT))
             return
         if r.phase == "discard":
             if self.seats[r.turn].bot:
@@ -216,11 +206,7 @@ class Room:
     def _auto_step(self, include_humans: bool) -> None:
         """替电脑（以及超时的真人）做一步操作。"""
         r = self.match.round
-        if r.phase == "ding":
-            for s in r.pending_ding():
-                if self.seats[s].bot or include_humans:
-                    r.choose_missing(s, ai.choose_missing(r.hands[s]))
-        elif r.phase == "claim":
+        if r.phase == "claim":
             for t in list(r.pending):
                 if r.phase != "claim":
                     break
@@ -228,7 +214,7 @@ class Room:
                     continue
                 if self.seats[t].bot:
                     act = ai.decide_claim(r.hands[t], len(r.melds[t]), r.visible(), r.pending[t],
-                                          r.last[1], r.missing[t])
+                                          r.last[1])
                 elif include_humans:
                     act = "hu" if "hu" in r.pending[t] else "pass"   # 真人超时：能胡就胡，否则过
                 else:
@@ -240,13 +226,11 @@ class Room:
                 return
             opts = [o for o in r.self_options(seat) if o["action"] != "open"]
             if self.seats[seat].bot:
-                act, kind = ai.decide_self(r.hands[seat], len(r.melds[seat]), r.visible(), opts,
-                                           r.missing[seat])
+                act, kind = ai.decide_self(r.hands[seat], len(r.melds[seat]), r.visible(), opts)
             elif any(o["action"] == "hu" for o in opts):
                 act, kind = "hu", -1
             else:
-                act, kind = "discard", ai.choose_discard(r.hands[seat], len(r.melds[seat]),
-                                                         r.visible(), r.missing[seat])
+                act, kind = "discard", ai.choose_discard(r.hands[seat], len(r.melds[seat]), r.visible())
             if act == "discard":
                 r.discard(seat, kind)
             elif act == "hu":
@@ -290,7 +274,7 @@ class Room:
                 "wall": len(r.wall),
                 "discards": r.discards,
                 "melds": r.melds,
-                "missing": r.missing,
+                "suits": r.suits,
                 "opened": r.opened,
                 "openHands": [R.expand(r.hands[s]) if r.opened[s] else None for s in range(N_PLAYERS)],
                 "handCounts": [sum(h) for h in r.hands],
