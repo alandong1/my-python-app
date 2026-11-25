@@ -57,6 +57,7 @@ class Round:
         self.recorded = False                     # 结果是否已经计入整场比赛
         # 技能：房主开启后，摸完牌之后可以用；每局每个技能只能用一次
         self.draw_kind: Optional[int] = None      # 这一回合摸到的那张牌
+        self.notes: List[List[str]] = [[] for _ in range(N_PLAYERS)]   # 只给本人看的提示
         self.used: List[set] = [set() for _ in range(N_PLAYERS)]
         items = items or {}
         self.items_enabled = bool(items.get("enabled"))
@@ -81,6 +82,7 @@ class Round:
         self.draw_kind = kind
         self.drawn = True
         self.phase = "discard"
+        self._note(seat, f"摸到：{R.kind_name(kind)}")
 
     def _next_turn(self) -> None:
         self.drawn = False
@@ -125,6 +127,7 @@ class Round:
             self.wall[idx] = kind
             c[kind] -= 1
             c[tile] += 1
+            self._note(seat, f"偷天换日：你把 {R.kind_name(kind)} 换成了 {R.kind_name(tile)}")
         elif item == "steal":
             if opp is None or opp == seat or self.opened[opp] or sum(self.hands[opp]) == 0:
                 raise GameError("请选一位没有明牌的对手")
@@ -135,6 +138,8 @@ class Round:
             self.hands[opp][kind] += 1
             c[kind] -= 1
             c[tile] += 1
+            self._note(seat, f"釜底抽薪：你和座位{opp + 1}换牌，你给出 {R.kind_name(kind)}，拿到 {R.kind_name(tile)}")
+            self._note(opp, f"釜底抽薪：座位{seat + 1}和你换牌，你失去 {R.kind_name(tile)}，得到 {R.kind_name(kind)}")
         elif item == "lucky_pong":
             if src is None or src == seat or kind is None or kind not in self.discards[src] or c[kind] < 2:
                 raise GameError("请选一张别人打出的、手上已经有一对的牌")
@@ -232,6 +237,11 @@ class Round:
                     opts.append({"action": "gang_jia", "kind": m["kind"]})
         return opts
 
+    def _note(self, seat: int, text: str) -> None:
+        """给 seat 一个只有他自己能看到的提示。"""
+        self.notes[seat].append(text)
+        del self.notes[seat][:-20]
+
     def visible(self) -> List[int]:
         """所有人都看得见的牌（牌河和明牌），给电脑估算剩余牌用。"""
         v = [0] * R.KINDS
@@ -260,6 +270,8 @@ class Round:
             raise GameError("现在不是你出牌")
         if self.hands[seat][kind] <= 0:
             raise GameError("手里没有这张牌")
+        if self.opened[seat] and kind != self.draw_kind:
+            raise GameError("明牌之后只能打摸到的那张牌")
         if kind not in self.allowed_discards(seat):
             raise GameError("对方已经明牌，不能故意点炮")
         self.hands[seat][kind] -= 1

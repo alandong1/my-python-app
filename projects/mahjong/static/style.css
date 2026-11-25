@@ -308,3 +308,5 @@ button.small { padding: 6px 10px; font-size: 14px; }
 .check input[type="checkbox"] { width: 20px; height: 20px; }
 .tile.clickable.small { outline: 2px dashed var(--accent); outline-offset: 1px; }
 .actions button.item { background: #cfe8ff; color: #123; font-weight: 600; }
+.notes { margin: 6px auto 0; max-width: 640px; text-align: center; }
+.note { color: #ffe9a8; font-size: 14px; line-height: 1.6; }

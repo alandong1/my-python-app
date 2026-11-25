@@ -422,6 +422,7 @@ class Room:
                 "items": r.item_options(me) if me is not None else [],
                 "stock": r.stock[me] if me is not None else {},
                 "drawKind": r.draw_kind if (me is not None and r.drawn and r.turn == me) else None,
+                "notes": r.notes[me][-6:] if me is not None else [],
                 "claim": claim,
                 "result": r.result,
             }
