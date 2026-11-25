@@ -27,3 +27,12 @@ class MahjongItemStock(Base):
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     item: Mapped[str] = mapped_column(String(32), primary_key=True)
     count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MahjongMeta(Base):
+    """一次性的记录（比如「给所有玩家发过一万积分」已经做过了）。"""
+
+    __tablename__ = "mahjong_meta"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(64), default="")

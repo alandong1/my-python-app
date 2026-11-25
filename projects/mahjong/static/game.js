@@ -206,7 +206,7 @@
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }
 
-  let targeting = null;   // 摸牌前选目标：{ item: 'swap' | 'lucky_pong' | 'miracle_hu' }
+  let targeting = null;   // 使用技能时选目标：{ item, opp? }
 
   function seatName(i) {
     const s = view && view.seats[i];
@@ -352,14 +352,14 @@
 
     const disc = el('div', 'tiles small discards');
     const pickingDiscard = targeting && (targeting.item === 'lucky_pong' || targeting.item === 'miracle_hu')
-      && r.phase === 'predraw' && r.turn === view.you;
+      && r.phase === 'discard' && r.turn === view.you && r.drawKind !== null;
     r.discards[i].forEach((k, idx) => {
       const t = tileEl(k, { small: true });
       if (r.last && r.last[0] === i && idx === r.discards[i].length - 1) t.classList.add('last');
       if (pickingDiscard) {
         t.classList.add('clickable');
         t.onclick = () => {
-          send({ type: 'predraw', action: 'item', item: targeting.item, kind: k, src: i });
+          send({ type: 'item', item: targeting.item, kind: k, src: i });
           targeting = null;
         };
       }
@@ -370,13 +370,15 @@
     if (isMe) {
       const hand = el('div', 'tiles hand hand-wrap');
       const clickable = canDiscard();
-      const swapping = targeting && targeting.item === 'swap' && r.phase === 'predraw' && r.turn === view.you;
+      const handTarget = targeting && (targeting.item === 'swap' || (targeting.item === 'steal' && targeting.opp !== undefined))
+        && r.phase === 'discard' && r.turn === view.you && r.drawKind !== null;
+      const swapping = handTarget;
       r.hand.forEach((k) => {
         const t = tileEl(k);
         if (swapping) {
           t.classList.add('clickable');
           t.onclick = () => {
-            send({ type: 'predraw', action: 'item', item: 'swap', kind: k });
+            send({ type: 'item', item: targeting.item, kind: k, opp: targeting.opp });
             targeting = null;
           };
         } else if (clickable) {
@@ -436,17 +438,11 @@
     const r = view.round;
     const bar = $('actions');
     bar.replaceChildren();
-    if (r.phase === 'predraw' && r.turn === view.you) {
-      bar.append(btn('直接摸牌', '', () => { targeting = null; send({ type: 'predraw', action: 'skip' }); }));
-      for (const o of r.predraw) {
-        if (o.action !== 'item') continue;
-        const active = targeting && targeting.item === o.item;
-        bar.append(btn(`${o.name}${active ? '（选择中）' : ''}`, 'item', () => {
-          targeting = active ? null : { item: o.item };
-          renderTable();
-        }));
+    if (r.phase === 'discard' && r.turn === view.you && r.drawKind !== null && view.round.opened[view.you]) {
+      // 明牌的人：摸什么打什么；只有能暗杠时才会问他（这里给一个「打出摸到的牌」）
+      if (r.self.some((o) => o.action === 'gang_an')) {
+        bar.append(btn(`打出 ${tileName(r.drawKind)}`, '', () => send({ type: 'discard', kind: r.drawKind })));
       }
-      return;
     }
     if (r.phase === 'discard' && r.turn === view.you) {
       for (const o of r.self) {
@@ -465,22 +461,42 @@
       }
       bar.append(btn('过', 'pass', () => send({ type: 'claim', action: 'pass' })));
     }
+    // 摸完牌之后：使用技能（每局每个只能用一次）
+    if (r.phase === 'discard' && r.turn === view.you && r.drawKind !== null && view.items && view.items.length) {
+      if (targeting && targeting.item === 'steal' && targeting.opp === undefined) {
+        // 釜底抽薪：先选对手
+        for (const seat of [0, 1, 2]) {
+          if (seat === view.you || !view.seats[seat] || view.round.opened[seat]) continue;
+          bar.append(btn(`对 ${seatName(seat)}`, 'item', () => {
+            targeting = { item: 'steal', opp: seat };
+            renderTable();
+          }));
+        }
+        bar.append(btn('取消', 'pass', () => { targeting = null; renderTable(); }));
+      } else if (!targeting) {
+        for (const o of view.items) {
+          bar.append(btn(`使用${o.name}`, 'item', () => {
+            if (o.item === 'steal') targeting = { item: 'steal' };
+            else targeting = { item: o.item };
+            renderTable();
+          }));
+        }
+      } else {
+        bar.append(btn('取消', 'pass', () => { targeting = null; renderTable(); }));
+      }
+    }
   }
 
   function renderHint() {
     const r = view.round;
     let text = '';
-    if (r.phase === 'predraw') {
+    if (r.phase === 'discard') {
       if (r.turn === view.you) {
-        if (targeting && targeting.item === 'swap') text = '偷天换日：点你手上一张要换出去的牌';
+        if (targeting && targeting.item === 'steal' && targeting.opp === undefined) text = '釜底抽薪：先选一位对手';
+        else if (targeting && targeting.item === 'steal') text = '釜底抽薪：点你手上一张要换出去的牌';
+        else if (targeting && targeting.item === 'swap') text = '偷天换日：点你手上一张要换出去的牌（和牌墙随机一张换）';
         else if (targeting) text = `${ITEM_LABEL[targeting.item]}：点一张已经打出的牌`;
-        else text = '摸牌前：可以用一个道具，或者直接摸牌';
-      } else {
-        text = `${seatName(r.turn)} 摸牌前…`;
-      }
-    } else if (r.phase === 'discard') {
-      if (r.turn === view.you) {
-        text = selectedKind >= 0 ? '再点一次这张牌，就打出去' : '轮到你出牌：点一张牌选中，再点一次打出';
+        else text = selectedKind >= 0 ? '再点一次这张牌，就打出去' : '轮到你出牌：点一张牌选中，再点一次打出';
       } else if (view.seats[r.turn] && view.seats[r.turn].bot) {
         text = `${seatName(r.turn)} 正在思考…`;
       } else {
@@ -601,7 +617,7 @@
   // ------------------------------------------------------------ 大厅数据（积分、商城、排行榜）
 
   let lobbyData = null;
-  const ITEM_LABEL = { swap: '偷天换日', lucky_pong: '锦上添花', miracle_hu: '妙手回春' };
+  const ITEM_LABEL = { swap: '偷天换日', lucky_pong: '锦上添花', miracle_hu: '妙手回春', steal: '釜底抽薪' };
 
   async function loadLobby() {
     let data;
