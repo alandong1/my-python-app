@@ -103,38 +103,58 @@ def test_pinghu_cannot_win_on_discard_unless_opened():
     assert r.phase == "discard" and r.turn == 1   # 屁胡不能点炮，直接轮到下家
 
 
-def test_opened_pinghu_can_be_won_on_discard():
+def test_opened_player_cannot_be_deliberately_dealt_into():
     r = Round(0, random.Random(7))
     set_hands(r, [[28] + [18, 19, 20, 21, 22, 23, 24, 25, 26, 9, 10, 11, 12],
                   pinghu_waiting_on_fa(),
                   [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16]])
     r.turn = 1
     r.drawn = False
-    assert {"action": "open", "kind": None} in r.self_options(1)
     r.act_self(1, "open")
-    assert r.opened[1] is True
     r.turn = 0
     r.drawn = True
-    r.discard(0, 28)
-    assert r.pending.get(1) == ["hu"]
-    answer(r, {1: "hu"})
-    res = r.result
-    assert res["type"] == "win" and res["winners"][0]["seat"] == 1
-    assert res["winners"][0]["fan"] == 1                 # 明牌 1 翻
-    assert res["winners"][0]["points"] == 2              # 2 的 1 次方
-    assert res["deltas"] == [-2, 2, 0]
-
-
-def test_cannot_open_before_tenpai():
-    r = Round(0, random.Random(20))
-    set_hands(r, [[0, 1, 2, 3, 4, 5, 6, 7, 8, 27, 28, 29, 27, 18],    # 离听牌还远
-                  [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16],
-                  [13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16]])
-    r.turn = 0
-    r.drawn = True
-    assert not any(o["action"] == "open" for o in r.self_options(0))
+    assert 28 not in r.allowed_discards(0)              # 发给明牌的人会点炮，不允许
     with pytest.raises(GameError):
-        r.act_self(0, "open")
+        r.discard(0, 28)
+    r.discard(0, 18)                                    # 打别的牌可以
+    assert r.phase == "discard" or r.phase == "claim"
+
+
+def test_opened_player_only_draws_and_discards():
+    r = Round(0, random.Random(21))
+    set_hands(r, [pinghu_waiting_on_fa(), [13] * 13, [14] * 13])
+    r.turn = 0
+    r.drawn = False
+    r.act_self(0, "open")
+    r.drawn = True
+    assert all(o["action"] != "gang_an" for o in r.self_options(0))
+    r.turn = 1
+    r.drawn = True
+    r.hands[1] = R.counts_of([13, 14, 15, 16, 17, 9, 10, 11, 12, 13, 14, 15, 16, 16])
+    r.discard(1, 16)
+    r.act_self  # no-op
+    # 明牌的人打出的牌，别人不能碰（只能胡）
+    r.hands[2] = R.counts_of([16, 16] + [13] * 11)
+    assert r.pending == {} or 2 not in r.pending or "pong" not in r.pending[2]
+
+
+def test_draw_pays_non_tenpai_players_the_tenpai_maximum():
+    r = Round(0, random.Random(22))
+    # 0 号听发（屁胡，不能点炮，但有最大番）、1 号和 2 号不听
+    far = [18, 20, 22, 24, 26, 19, 21, 23, 25, 27, 28, 29, 1]    # 离听牌很远的散牌
+    set_hands(r, [pinghu_waiting_on_fa(), far, far])
+    r.wall = []
+    r.opened[0] = True                                  # 明牌后屁胡可以点炮，算听牌
+    r.turn = 2
+    r.drawn = True
+    r.hands[2] = R.counts_of(far + [27])
+    r.discard(2, 27)                                    # 墙空了 → 流局
+    res = r.result
+    assert res["type"] == "draw"
+    assert [t["seat"] for t in res["tenpai"]] == [0]
+    pts = res["tenpai"][0]["points"]
+    assert res["deltas"][0] == 2 * pts
+    assert res["deltas"][1] == -pts and res["deltas"][2] == -pts
 
 
 def test_pinghu_self_draw_is_allowed():
@@ -179,16 +199,17 @@ def test_gang_ming_draws_replacement_and_pays_discarder():
     assert r.turn == 1 and r.phase == "discard" and r.drawn is True
 
 
-def test_concealed_gang_is_not_allowed():
-    """四张一样的牌要留在手里做四归一，不能暗杠。"""
+def test_concealed_gang_is_allowed_for_four_identical_tiles():
     r = Round(0, random.Random(12))
     set_hands(r, [[4] * 4 + [18, 19, 20, 21, 22, 23, 24, 25, 26],
                   [0] * 13, [1] * 13])
     r.turn = 0
     r.drawn = True
-    assert not any(o["action"] == "gang_an" for o in r.self_options(0))
-    with pytest.raises(GameError):
-        r.act_self(0, "gang_an", 4)
+    assert {"action": "gang_an", "kind": 4} in r.self_options(0)
+    r.act_self(0, "gang_an", 4)
+    assert r.melds[0] == [{"type": "gang_an", "kind": 4, "from": None}]
+    assert r.gang_pay == [2, -1, -1]
+    assert r.phase == "discard" and r.drawn is True
 
 
 def test_bad_actions_raise_and_change_nothing():

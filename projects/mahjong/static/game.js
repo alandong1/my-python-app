@@ -551,6 +551,14 @@
     card.append(el('h2', null, view.state === 'match_end' ? '整场结束' : `第 ${view.roundNo} 局结束`));
     if (res.type === 'draw') {
       card.append(el('p', 'win-line', '流局：牌墙摸完，无人和牌'));
+      if (res.tenpai && res.tenpai.length) {
+        for (const t of res.tenpai) {
+          const names = t.items.map(([n, v]) => `${n} ${v} 翻`).join('，') || '屁胡（不翻）';
+          card.append(el('p', 'detail', `${seatName(t.seat)} 听牌，最大可和：${names}，${t.points} 分`));
+        }
+      } else if (res.tenpai) {
+        card.append(el('p', 'detail', '没有人听牌，不付钱。'));
+      }
     }
     for (const w of res.winners) {
       const how = w.selfDraw ? '自摸' : `点炮（${seatName(res.from)} 放炮）`;
