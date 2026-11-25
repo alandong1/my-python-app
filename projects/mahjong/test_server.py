@@ -188,3 +188,21 @@ def test_joining_unknown_room_reports_error(client_guest):
         msg = ws.receive_json()
         assert msg["type"] == "error"
         assert "没有这个房间" in msg["text"]
+
+
+def test_unavailable_rule_cannot_be_opened(client_guest):
+    with client_guest.websocket_connect("/apps/mahjong/ws") as ws:
+        ws.send_json({"type": "create", "rule": "sichuan", "rounds": 1})
+        msg = ws.receive_json()
+        assert msg["type"] == "error" and "还没有开放" in msg["text"]
+
+
+def test_lobby_lists_all_rules_and_home_name_changed(client_guest):
+    data = client_guest.get("/apps/mahjong/api/lobby").json()
+    ids = [r["id"] for r in data["rules"]]
+    assert ids == ["hubei", "hongzhong", "sichuan", "xueliu", "shanghai"]
+    assert data["rules"][0]["available"] is True
+    assert all(not r["available"] for r in data["rules"][1:])
+    home = client_guest.get("/api/apps").json()
+    card = next(a for a in home["apps"] if a["slug"] == "mahjong")
+    assert card["name"] == "麻将小游戏"

@@ -636,6 +636,7 @@
       return;
     }
     lobbyData = data;
+    fillRules(data.rules || []);
     $('me').textContent = `${data.me.name} · 积分 ${data.me.points}`;
     $('resume-box').classList.toggle('hidden', !data.myRoom);
 
@@ -667,6 +668,27 @@
     }
   }
 
+  function fillRules(rules) {
+    const sel = $('rule-lobby');
+    if (sel.options.length === rules.length) return;   // 已经填过
+    sel.replaceChildren();
+    for (const r of rules) {
+      const o = el('option', null, r.available ? r.name : `${r.name}（${r.note}）`);
+      o.value = r.id;
+      o.disabled = !r.available;
+      sel.append(o);
+    }
+    sel.value = 'hubei';
+    lobbyRules = rules;
+    showRuleNote();
+  }
+
+  let lobbyRules = [];
+  function showRuleNote() {
+    const r = lobbyRules.find((x) => x.id === $('rule-lobby').value);
+    $('rule-note').textContent = r ? r.note : '';
+  }
+
   async function buyItem(item) {
     try {
       const r = await fetch(BASE + 'api/shop/buy', {
@@ -688,11 +710,12 @@
   function visibilityValue() { return $('visibility-lobby').value; }
 
   $('btn-solo').onclick = () => connect({
-    type: 'solo', rounds: Number($('rounds-lobby').value), items: $('items-lobby').checked,
+    type: 'solo', rule: $('rule-lobby').value, rounds: Number($('rounds-lobby').value), items: $('items-lobby').checked,
   });
   $('btn-create').onclick = () => connect({
-    type: 'create', rounds: Number($('rounds-lobby').value), visibility: visibilityValue(),
+    type: 'create', rule: $('rule-lobby').value, rounds: Number($('rounds-lobby').value), visibility: visibilityValue(),
   });
+  $('rule-lobby').onchange = () => showRuleNote();
   $('btn-join').onclick = () => {
     const code = $('code').value.trim();
     if (!/^\d{4}$/.test(code)) return toast('请输入四位房间号');

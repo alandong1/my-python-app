@@ -25,7 +25,7 @@ from app.auth import SESSION_COOKIE, lookup_session_user, require_user, ws_same_
 from app.db import get_db
 from app.pages import html_page
 
-from . import store
+from . import rules_catalog, store
 from .engine import GameError
 from .room import ROUND_CHOICES, Room
 
@@ -78,6 +78,7 @@ async def lobby(request: Request):
     public = [r.summary() for r in rooms.values() if r.visibility == "public" and r.state() == "waiting"]
     mine = next((r.code for r in rooms.values() if r.seat_of(str(uid)) is not None and r.in_game()), None)
     return {
+        "rules": rules_catalog.RULES,
         "me": {"name": name, "points": wallet["points"], "items": wallet["items"]},
         "shop": {k: {"name": v["name"], "price": v["price"]} for k, v in store.ITEMS.items()},
         "leaderboard": board,
@@ -111,7 +112,11 @@ async def shop_buy(body: BuyIn, request: Request):
 async def _enter(ws: WebSocket, pid: str, name: str, msg: dict) -> Room:
     kind = msg["type"]
     if kind in ("create", "solo"):
+        rule = str(msg.get("rule") or "hubei")
+        if not rules_catalog.is_available(rule):
+            raise GameError("这个玩法还没有开放，规则确认后再上线")
         room = Room(_new_code(), "public" if msg.get("visibility") == "public" else "private")
+        room.rule = rule
         room.rounds = _clean_rounds(msg.get("rounds"))
         rooms[room.code] = room
         await ws.send_json({"type": "joined", "code": room.code})

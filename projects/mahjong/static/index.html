@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>湖北卡五星</title>
+  <title>麻将小游戏</title>
   <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
   <main id="app">
     <!-- 大厅：账号信息、继续游戏、建房、加入、公开房间、排行榜、积分商城 -->
     <section id="lobby" class="panel lobby">
-      <h1>🀄 湖北卡五星</h1>
+      <h1>🀄 麻将小游戏</h1>
       <div id="me" class="me-card muted"></div>
 
       <div id="resume-box" class="resume hidden">
@@ -20,6 +20,10 @@
 
       <div class="block">
         <h2>开一局</h2>
+        <label class="field">玩法
+          <select id="rule-lobby"></select>
+        </label>
+        <p id="rule-note" class="muted"></p>
         <label class="field">局数
           <select id="rounds-lobby">
             <option value="1">1 局</option>

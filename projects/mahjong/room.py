@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import ai
 from . import rules as R
+from . import rules_catalog
 from . import store
 from .engine import ITEM_NAMES, N_PLAYERS, GameError, Match
 
@@ -47,6 +48,7 @@ class Seat:
 class Room:
     def __init__(self, code: str, visibility: str = "private", rng: Optional[random.Random] = None):
         self.code = code
+        self.rule = "hubei"                       # 玩法（目前只有湖北卡五星可以开）
         self.visibility = visibility if visibility in VISIBILITY else "private"
         self.rounds = 4
         self.items_enabled = False
@@ -87,6 +89,8 @@ class Room:
         host = next((s for s in self.seats if s and s.pid == self.host), None)
         return {
             "code": self.code,
+            "rule": self.rule,
+            "ruleName": rules_catalog.label(self.rule),
             "host": host.name if host else "",
             "seats": sum(1 for s in self.seats if s is not None),
             "rounds": self.rounds,
@@ -381,6 +385,8 @@ class Room:
         d: Dict[str, Any] = {
             "type": "state",
             "code": self.code,
+            "rule": self.rule,
+            "ruleName": rules_catalog.label(self.rule),
             "visibility": self.visibility,
             "state": self.state(),
             "rounds": self.rounds,

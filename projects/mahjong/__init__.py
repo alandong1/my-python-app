@@ -5,10 +5,10 @@ from . import models, server  # models：让 init_db() 能建出积分和道具�
 
 PROJECT = Project(
     slug="mahjong",
-    name="湖北卡五星",
-    description="湖北卡五星麻将：建房间邀请好友联机，不够人就由电脑补位，也可以直接和电脑玩。",
-    name_en="Hubei Ka Wu Xing Mahjong",
-    description_en="Hubei Ka Wu Xing mahjong: create a room and play with friends online, with computer players filling empty seats, or play against the computer alone.",
+    name="麻将小游戏",
+    description="多种麻将玩法：湖北卡五星（已开放），红中赖子杠、四川血战到底、血流成河、上海麻将（规则确认中）。可以联机，也可以和电脑玩。",
+    name_en="Mahjong Games",
+    description_en="Several mahjong variants. Hubei Ka Wu Xing is available now; others are being finalised. Play online with friends or against the computer.",
     icon="🀄",
     category="游戏",
     status="测试中",
