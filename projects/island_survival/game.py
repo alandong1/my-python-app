@@ -501,60 +501,60 @@ class Game:
         p.inv["raw_meat"] = p.inv.get("raw_meat", 0) + 1
         self._msg(p, f"打死了{name}，得到一块生肉")
 
-    def _chop(self, p: Player, r: Resource) -> None:
-        r.hp -= 1
-        gain = 1 + self._tool_bonus_axe(p)
-        p.inv["wood"] = p.inv.get("wood", 0) + gain
-        if r.hp > 0:
-            self._msg(p, f"砍了一下树，得到 {gain} 木材")
-            return
+    def clock(self) -> Dict:
+        """昼夜：白天还是夜晚，这个阶段还剩多少秒，现在是第几天。"""
+        t = self.time % C.DAY_TOTAL
+        night = t >= C.DAY_LEN
+        left = (C.DAY_TOTAL if night else C.DAY_LEN) - t
+        return {"day": int(self.time // C.DAY_TOTAL) + 1, "night": night, "left": round(left, 1)}
+
+    def _roll(self, center: int, spread: int) -> int:
+        """中间值上下浮动一点的随机数。"""
+        return max(0, self.rng.randint(center - spread, center + spread))
+
+    def _fell(self, r: Resource) -> None:
+        """资源被采空：从世界里拿掉，过一会儿再长回来。"""
         r.present = False
-        r.regrow_at = self.time + C.RESOURCES["tree"][2]
-        self.tree_at.pop(r.z * W + r.x, None)
+        r.hp = 0
+        r.regrow_at = self.time + C.RESOURCES[r.kind][2]
+        if r.kind == "tree":
+            self.tree_at.pop(r.z * W + r.x, None)
+        elif r.kind == "rock":
+            self.rock_at.pop(r.z * W + r.x, None)
+
+    def _chop(self, p: Player, r: Resource) -> None:
+        """砍倒一棵树：木材随机，一次性全部拿到（有斧子多一点）。"""
+        gain = self._roll(*C.YIELD["tree"][1:]) + self._tool_bonus_axe(p)
+        self._add(p, "wood", gain)
         msg = f"砍倒了一棵树，得到 {gain} 木材"
-        if self.rng.random() < 0.6:
-            p.inv["coconut"] = p.inv.get("coconut", 0) + 1
+        if self.rng.random() < C.COCONUT_CHANCE:
+            self._add(p, "coconut", 1)
             msg += "，还掉下一个椰子"
+        self._fell(r)
         self._msg(p, msg)
 
     def _gather(self, p: Player, r: Resource) -> None:
+        """采空一个资源点：数量随机，一次性全部拿到。"""
         if r.kind == "rock":
-            # 空手也能掰下石头（1 块），有石镐 2 块；空手也有几率挖到铁矿石，有铁镐更高。
-            # 这样不会出现「要石镐 → 要工作台 → 要石头」「要铁镐 → 要铁锭 → 要铁矿石」的死循环。
-            stone = 2 if p.inv.get("stone_pick", 0) + p.inv.get("iron_pick", 0) > 0 else 1
+            stone = self._roll(*C.YIELD["rock"][1:])
             self._add(p, "stone", stone)
             ore_chance = 0.4 if p.inv.get("iron_pick", 0) > 0 else 0.2
+            msg = f"挖到了 {stone} 块石头"
             if self.rng.random() < ore_chance:
                 self._add(p, "iron_ore", 1)
-                self._msg(p, f"采到了 {stone} 块石头，还有一块铁矿石")
-            else:
-                self._msg(p, f"采到了 {stone} 块石头")
-        elif r.kind == "reed":
-            self._add(p, "fiber", 1)
-            self._msg(p, "割了一把芦苇，得到纤维")
-        elif r.kind == "herb":
-            self._add(p, "herb", 1)
-            msg = "采集到 1 个草本植物"
-            if self.rng.random() < C.WILD_SEED_CHANCE:
+                msg += "，还有一块铁矿石"
+            self._msg(p, msg)
+        else:
+            item, center, spread = C.YIELD[r.kind]
+            n = self._roll(center, spread)
+            self._add(p, item, n)
+            msg = f"采到了 {n} 个{C.ITEMS[item]}"
+            if r.kind == "herb" and self.rng.random() < C.WILD_SEED_CHANCE:
                 seed = self.rng.choice(C.SEEDS)
                 self._add(p, seed, 1)
                 msg += f"，还掉下一颗{C.ITEMS[seed]}"
             self._msg(p, msg)
-        elif r.kind == "bush":
-            self._add(p, "berry", 1)
-            self._msg(p, "采到 1 个浆果")
-        elif r.kind == "shell":
-            self._add(p, "shell", 1)
-            self._msg(p, "捡到一个贝壳")
-        elif r.kind == "mushroom":
-            self._add(p, "mushroom", 1)
-            self._msg(p, "采到一朵蘑菇")
-        r.hp -= 1
-        if r.hp <= 0:
-            r.present = False
-            r.regrow_at = self.time + C.RESOURCES[r.kind][2]
-            if r.kind == "rock":
-                self.rock_at.pop(r.z * W + r.x, None)
+        self._fell(r)
 
     def _add(self, p: Player, item: str, n: int) -> None:
         p.inv[item] = p.inv.get(item, 0) + n
@@ -588,6 +588,49 @@ class Game:
         if b.level < level:
             raise GameError(f"{C.BUILDS[station]['name']}要升到 {level} 级才能做这个")
 
+    def _hand_recipe(self, item: str, role: str) -> Optional[str]:
+        """能随手做出这个东西的配方（不需要设施）。"""
+        return next((rid for rid, r in C.RECIPES.items()
+                     if r["station"] is None and item in r["out"]
+                     and (not r.get("role") or r["role"] == role)), None)
+
+    def _plan_make(self, inv: Dict[str, int], item: str, qty: int, role: str,
+                   steps: list, depth: int = 0) -> bool:
+        """在背包副本 inv 上算：能不能凑够 qty 个 item（缺的用随手配方做）。"""
+        have = inv.get(item, 0)
+        if have >= qty:
+            return True
+        if depth > 4:
+            return False
+        rid = self._hand_recipe(item, role)
+        if rid is None:
+            return False
+        r = C.RECIPES[rid]
+        per = r["out"][item]
+        times = -(-(qty - have) // per)          # 向上取整
+        for k, m in r["in"].items():
+            if not self._plan_make(inv, k, m * times, role, steps, depth + 1):
+                return False
+        for k, m in r["in"].items():
+            inv[k] -= m * times
+        inv[item] = inv.get(item, 0) + per * times
+        steps.append((rid, times))
+        return True
+
+    def _ensure_items(self, p: Player, need: Dict[str, int]) -> List[str]:
+        """确保背包里有 need 这些东西：不够就自动合成随手能做的。返回还缺的（空表示够了）。
+        材料不够时什么都不改，不会白白消耗。"""
+        inv = dict(p.inv)
+        steps: list = []
+        for k, n in need.items():
+            if not self._plan_make(inv, k, n, p.role, steps):
+                return [C.ITEMS[k]]
+        p.inv = inv
+        for rid, times in steps:
+            made = ", ".join(f"{C.ITEMS[k]} ×{n * times}" for k, n in C.RECIPES[rid]["out"].items())
+            self._msg(p, f"材料不够，先自动合成了 {made}")
+        return []
+
     def craft(self, p: Player, recipe_id: str) -> None:
         self._outdoor_only(p)
         r = C.RECIPES.get(recipe_id)
@@ -596,7 +639,7 @@ class Game:
         # 有的配方对不同角色要的材料不一样（比如草药：医生 3 个，其他人 6 个）
         inputs = r["in"] if not r.get("role") or r["role"] == p.role else r.get("in_other", r["in"])
         self._station_ok(p, r["station"], r["level"])
-        missing = [C.ITEMS[k] for k, n in inputs.items() if p.inv.get(k, 0) < n]
+        missing = self._ensure_items(p, inputs)
         if missing:
             raise GameError("材料不够：还缺 " + "、".join(missing))
         for k, n in inputs.items():
@@ -621,9 +664,6 @@ class Game:
             raise GameError("不能建这个")
         if kind == "house" and self._nearest_building(p, ("house",), 6.0):
             raise GameError("附近已经有房子了，离远一点再建")
-        missing = [C.ITEMS[k] for k, n in spec["cost"].items() if p.inv.get(k, 0) < n]
-        if missing:
-            raise GameError("材料不够：还缺 " + "、".join(missing))
         size = spec["size"]
         tx = int(math.floor(p.x + fx * 2.0))
         tz = int(math.floor(p.z + fz * 2.0))
@@ -637,6 +677,9 @@ class Game:
                 raise GameError("这里已经有东西了")
         if self._dist(p, tx + size / 2, tz + size / 2) > 3.5 + size:
             raise GameError("离得太远了")
+        missing = self._ensure_items(p, spec["cost"])
+        if missing:
+            raise GameError("材料不够：还缺 " + "、".join(missing))
         for k, n in spec["cost"].items():
             p.inv[k] -= n
         b = self._place_building(kind, tx, tz, owner=p.account_id)
@@ -662,7 +705,7 @@ class Game:
         if b.level >= spec["max_level"]:
             raise GameError(f"{spec['name']}已经是最高级了")
         cost = C.UPGRADES[b.kind][b.level + 1]
-        missing = [C.ITEMS[k] for k, n in cost.items() if p.inv.get(k, 0) < n]
+        missing = self._ensure_items(p, cost)
         if missing:
             raise GameError("升级材料不够：还缺 " + "、".join(missing))
         for k, n in cost.items():
@@ -680,7 +723,8 @@ class Game:
         p.inv["wood"] -= 1
         base = max(self.time, b.fuel_until)
         b.fuel_until = min(self.time + C.FUEL_MAX, base + C.FUEL_SECONDS[b.level])
-        self._msg(p, "加了一根柴，火烧得更旺了")
+        mins = C.FUEL_SECONDS[b.level] // 60
+        self._msg(p, f"加了一根柴，能再烧约 {mins} 分钟")
 
     # ------------------------------------------------------------ 种田
 
@@ -1043,6 +1087,7 @@ class Game:
             "upgrades": {k: {str(lv): cost for lv, cost in v.items()} for k, v in C.UPGRADES.items()},
             "crops": {k: {"name": v["name"], "grow": v["grow"]} for k, v in C.CROPS.items()},
             "roomSize": {str(k): v for k, v in C.ROOM_SIZE.items()},
+            "lightRadius": {str(k): v for k, v in C.LIGHT_RADIUS.items()},
             "furniture": list(C.FURNITURE),
             "tools": list(C.TOOLS),
         }
@@ -1058,6 +1103,7 @@ class Game:
         msgs, p.events = p.events, []
         data = {
             "t": round(self.time, 1),
+            "clock": self.clock(),
             "me": {
                 "id": p.id, "name": p.name, "role": p.role,
                 "x": round(p.x, 2), "z": round(p.z, 2),

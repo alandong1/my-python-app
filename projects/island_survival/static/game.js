@@ -8,6 +8,7 @@ const TERRAIN_C = ['#1d4a72', '#3f93bd', '#e3cf93', '#6aa347', '#3a7535'];
 const ROLE_COLOR = { chef: 0xe07b39, doctor: 0xf2f2f2, priest: 0x7a5cc4 };
 const CROP_COLOR = { carrot: '#ff8c2b', potato: '#a77a3f', corn: '#f2c230' };
 const HORIZON = '#cfe6f2';
+const DAY_FOG = new THREE.Color(HORIZON), NIGHT_FOG = new THREE.Color('#1a2238');
 // 远端玩家和动物按「过去 100 毫秒」的画面显示：服务器每 0.1 秒发一次，网络有快有慢，
 // 延迟 100 毫秒后就有两个快照可以匀速插值，画面不会一顿一顿。（和 strike 的做法相同）
 const INTERP_MS = 100;
@@ -20,6 +21,8 @@ let roomGroup = null, roomKey = '', lastHouse = undefined;
 const keys = new Set();
 let joy = { x: 0, y: 0 };
 let lastInvKey = '', toastTimer = 0, lastFrame = 0;
+let nightK = 0;                      // 0 = 白天，1 = 夜晚，中间是傍晚和黎明（画面平滑过渡）
+let clockInfo = null;
 const shared = {};
 const focus = new THREE.Vector3();   // 镜头盯着的点
 
@@ -115,10 +118,12 @@ function initScene() {
   scene = new THREE.Scene();
   scene.fog = new THREE.Fog(HORIZON, 70, 190);
   camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
-  scene.add(makeSky());
+  shared.sky = makeSky();
+  scene.add(shared.sky);
 
   // 天光 + 太阳（会投影的主光）
-  scene.add(new THREE.HemisphereLight('#cfe6ff', '#4a5a3a', 1.0));
+  shared.hemi = new THREE.HemisphereLight('#cfe6ff', '#4a5a3a', 1.0);
+  scene.add(shared.hemi);
   sun = new THREE.DirectionalLight('#ffe6bd', 2.2);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -595,10 +600,18 @@ function makeBuilding(kind, level, state) {
       g.add(log);
     }
     if (lit) {
+      // 等级越高，火苗越大、灯光越亮、照得越远
+      const scale = 0.8 + 0.35 * level;
       const flame = new THREE.Mesh(shared.flame, shared.flameMat);
       flame.position.y = 0.45;
+      flame.scale.setScalar(scale);
       flame.userData.flame = true;
+      flame.userData.base = scale;
       g.add(flame);
+      const radius = (info.lightRadius && info.lightRadius[String(level)]) || 3.5;
+      const light = new THREE.PointLight('#ffb060', 1.2 + 0.7 * level, radius * 1.6);
+      light.position.y = 0.8;
+      g.add(light);
     }
   } else if (kind === 'furnace') {
     g.add(box(0.9, 1.1, 0.9, shared.furnMat, 0, 0.55, 0));
@@ -675,6 +688,7 @@ function applyState(s) {
     lastHouse = house;
   }
   setBars(m);
+  if (s.clock) setClock(s.clock);
   setInventory(m.inv, house !== null);
   setLog(m.events);
   $('meName').textContent = m.name;
@@ -951,6 +965,13 @@ function removeMissing(map, seen) {
   for (const [id, obj] of map) {
     if (!seen.has(id)) { scene.remove(obj); map.delete(id); }
   }
+}
+
+// 昼夜时钟：第几天、白天还是夜晚、离下一个阶段还有几分钟（现实 1 分钟 = 游戏 1 小时）
+function setClock(c) {
+  clockInfo = c;
+  const mins = Math.ceil(c.left / 60);
+  $('clock').textContent = `第 ${c.day} 天 · ${c.night ? '夜晚' : '白天'} · ${c.night ? '天亮还有' : '距离夜晚'}约 ${mins} 分钟`;
 }
 
 function setBars(m) {
@@ -1307,7 +1328,9 @@ function frame(now) {
   }
   // 火堆的火苗闪动
   for (const entry of buildings.values()) {
-    entry.group.children.forEach((c) => { if (c.userData.flame) c.scale.setScalar(0.9 + 0.15 * Math.sin(t * 12 + c.position.y)); });
+    entry.group.children.forEach((c) => {
+        if (c.userData.flame) c.scale.setScalar(c.userData.base * (0.9 + 0.15 * Math.sin(t * 12 + c.position.y)));
+      });
   }
 
   // 镜头盯着自己的模型（插值后的位置），再平滑地跟过去
@@ -1322,6 +1345,12 @@ function frame(now) {
   placeInteract();
 
   if (!inside) {
+    // 昼夜：天色、光线、雾色随时间平滑变化
+    if (clockInfo) nightK += ((clockInfo.night ? 1 : 0) - nightK) * Math.min(1, dt * 0.4);
+    sun.intensity = 2.2 + (0.25 - 2.2) * nightK;
+    shared.hemi.intensity = 1.0 + (0.45 - 1.0) * nightK;
+    shared.sky.material.color.setScalar(1 - 0.75 * nightK);
+    scene.fog.color.lerpColors(DAY_FOG, NIGHT_FOG, nightK);
     // 太阳和阴影跟着镜头走：阴影只需要覆盖身边这一块，清晰又省资源
     sun.position.set(focus.x + 60, focus.y + 90, focus.z + 30);
     sun.target.position.copy(focus);

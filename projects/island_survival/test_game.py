@@ -125,27 +125,22 @@ def test_chop_tree_with_stone_axe_gives_more_wood_then_regrows(spot):
     g.res.append(tree)
     g.tree_at[z * W + x + 1] = tree.id
     p.inv = {"stone_axe": 1}
-    for _ in range(3):
-        interact_and_wait(g, p)
-        passed(g, 1)
-    assert p.inv["wood"] == 6                  # 石斧：每下 2 个木材
+    interact_and_wait(g, p)                      # 砍一次就倒下：木材随机 5–9，石斧再 +1
+    assert 6 <= p.inv["wood"] <= 10
     assert tree.present is False and (z * W + x + 1) not in g.tree_at
     passed(g, C.RESOURCES["tree"][2] + 1)
     g.tick()
     assert tree.present is True and tree.hp == 3
 
 
-def test_rock_gives_stone_by_hand_and_more_with_stone_pick(spot):
+def test_rock_gives_stone_by_hand_and_stone_pick_is_not_needed(spot):
     g, p, x, z = spot
     rock = Resource(id=len(g.res), kind="rock", x=x + 1, z=z, hp=3)
     g.res.append(rock)
     g.rock_at[z * W + x + 1] = rock.id
-    interact_and_wait(g, p)                     # 空手：1 块石头
-    assert p.inv["stone"] == 1
-    passed(g, 1)
-    p.inv["stone_pick"] = 1
-    interact_and_wait(g, p)                     # 有石镐：2 块
-    assert p.inv["stone"] == 3
+    interact_and_wait(g, p)                      # 空手也能挖：石头 4–6 个，一次拿完
+    assert 4 <= p.inv["stone"] <= 6
+    assert rock.present is False
 
 
 def test_gather_small_resources(spot):
@@ -163,12 +158,12 @@ def test_pressing_interact_twice_does_not_stack_work(spot):
     g.res.append(tree)
     g.tree_at[z * W + x + 1] = tree.id
     g.act(p, "interact", {})
-    g.act(p, "interact", {})                     # 正在砍，再按不会多砍一下
+    g.act(p, "interact", {})                     # 正在砍，再按不会多砍一棵
     for _ in range(400):
         if p.work is None:
             break
         g.tick()
-    assert p.inv["wood"] == 1
+    assert 5 <= p.inv["wood"] <= 9
 
 
 def test_hunt_rabbit_and_it_flees(spot):
@@ -821,8 +816,8 @@ def test_one_press_chops_three_trees_at_once(spot):
         if p.work is None:
             break
         g.tick()
-    assert [t.hp for t in trees] == [2, 2, 2]     # 三棵都被砍了一下
-    assert p.inv["wood"] == 3
+    assert all(t.present is False for t in trees)  # 三棵一起倒下
+    assert 15 <= p.inv["wood"] <= 27               # 每棵 5–9 个木材
 
 
 def test_batch_takes_longer_than_one_but_less_than_three_separately(spot):
@@ -841,7 +836,7 @@ def test_three_rocks_at_once_with_stone_pick(spot):
     for dx, dz in [(1, 0), (1, -1), (0, -1)]:
         _add_res(g, "rock", x + dx, z + dz)
     interact_and_wait(g, p)
-    assert p.inv["stone"] == 6                    # 石镐：每块 2 个，三块一起
+    assert 12 <= p.inv["stone"] <= 18            # 三块一起挖，每块 4–6 个石头
 
 
 def test_batch_only_takes_the_same_kind(spot):
@@ -864,4 +859,68 @@ def test_batch_skips_targets_that_are_gone(spot):
         if p.work is None:
             break
         g.tick()
-    assert b.hp == 2 and p.inv["wood"] == 1       # 只结算还在的那一棵
+    assert b.present is False and 5 <= p.inv["wood"] <= 9   # 只结算还在的那一棵
+
+
+
+
+# ------------------------------------------------------------ 第三阶段第一批：自动合成、篝火、昼夜、随机产量
+
+def test_auto_craft_rope_for_house_when_fiber_is_enough(spot):
+    g, p, x, z = spot
+    p.inv = {"wood": 20, "stone": 6, "fiber": 6}      # 没有绳子，但纤维够 2 根绳子
+    build(g, p, "house", fx=0.0, fz=1.0)
+    assert any(b.kind == "house" for b in g.buildings.values())
+    assert p.inv.get("rope", 0) == 0 and p.inv.get("fiber", 0) == 0
+    assert any("自动合成" in m for m in p.events)
+
+
+def test_auto_craft_changes_nothing_if_not_enough(spot):
+    g, p, x, z = spot
+    p.inv = {"wood": 20, "stone": 6, "fiber": 3}      # 纤维只够 1 根绳子，房子要 2 根
+    with pytest.raises(GameError) as e:
+        build(g, p, "house", fx=0.0, fz=1.0)
+    assert "绳子" in str(e.value)
+    assert p.inv == {"wood": 20, "stone": 6, "fiber": 3}   # 什么都没有被消耗
+
+
+def test_campfire_burn_time_by_level(spot):
+    g, p, x, z = spot
+    for level in (1, 2, 3):
+        b = g._place_building("campfire", x - 2, z + level * 0, level=level)   # 只是为了测试时间
+        g.build_at.pop(z * W + x - 2, None)
+        p.inv = {"wood": 1}
+        p.x, p.z = x + 0.5, z + 0.5
+        b.fuel_until = 0.0
+        g.act(p, "fuel", {})
+        assert b.fuel_until - g.time == pytest.approx(C.FUEL_SECONDS[level])
+        g.buildings.pop(b.id)
+
+
+def test_campfire_light_radius_grows_with_level():
+    assert C.LIGHT_RADIUS[1] < C.LIGHT_RADIUS[2] < C.LIGHT_RADIUS[3]
+    assert C.FUEL_SECONDS[1] == 180 and C.FUEL_SECONDS[2] == 360 and C.FUEL_SECONDS[3] == 600
+
+
+def test_day_is_18_minutes_and_night_is_6_minutes():
+    g = Game(2026)
+    g.time = 0.0
+    assert g.clock()["night"] is False and g.clock()["left"] == pytest.approx(18 * 60)
+    g.time = 17 * 60 + 59
+    assert g.clock()["night"] is False
+    g.time = 18 * 60 + 1
+    assert g.clock()["night"] is True
+    assert g.clock()["left"] == pytest.approx(6 * 60 - 1, abs=0.5)
+    g.time = 24 * 60 + 5
+    assert g.clock() == {"day": 2, "night": False, "left": pytest.approx(18 * 60 - 5, abs=0.5)}
+
+
+def test_view_sends_the_clock(g):
+    p = g.join(1, "甲", "chef")
+    assert "clock" in g.view(p, False) and "night" in g.view(p, False)["clock"]
+
+
+def test_yields_are_random_around_the_middle_value(g):
+    vals = [g._roll(7, 2) for _ in range(800)]
+    assert min(vals) == 5 and max(vals) == 9
+    assert 6.7 < sum(vals) / len(vals) < 7.3
