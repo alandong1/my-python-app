@@ -1,11 +1,14 @@
-/* 湖北卡五星：大厅、房间和牌桌的界面。规则都在服务器上算，这里只负责显示和发送操作。 */
+/* 湖北卡五星（三人）：大厅、房间和牌桌的界面。规则都在服务器上算，这里只负责显示和发送操作。 */
 (() => {
   'use strict';
 
   const $ = (id) => document.getElementById(id);
   const SUIT_NAMES = ['万', '条', '筒'];
   const SUIT_CLASS = ['wan', 'tiao', 'tong'];
+  const HONOR_NAMES = ['中', '发', '白'];
+  const HONOR_CLASS = ['zhong', 'fa', 'bai'];
   const ACTION_LABEL = { hu: '胡', pong: '碰', gang_ming: '明杠', pass: '过' };
+  const MISSING_CLASS = ['missing-wan', 'missing-tiao', 'missing-tong'];
   const BASE = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
   const NAME_KEY = 'mahjong.name';
 
@@ -23,7 +26,10 @@
     return e;
   }
 
+  function isHonor(kind) { return kind >= 27; }
+
   function tileName(kind) {
+    if (isHonor(kind)) return HONOR_NAMES[kind - 27];
     return `${(kind % 9) + 1}${SUIT_NAMES[Math.floor(kind / 9)]}`;
   }
 
@@ -34,8 +40,13 @@
       t.classList.add('back');
       return t;
     }
-    t.classList.add(SUIT_CLASS[Math.floor(kind / 9)]);
-    t.append(el('b', null, String((kind % 9) + 1)), el('i', null, SUIT_NAMES[Math.floor(kind / 9)]));
+    if (isHonor(kind)) {
+      t.classList.add(HONOR_CLASS[kind - 27]);
+      t.append(el('b', null, HONOR_NAMES[kind - 27]));
+    } else {
+      t.classList.add(SUIT_CLASS[Math.floor(kind / 9)]);
+      t.append(el('b', null, String((kind % 9) + 1)), el('i', null, SUIT_NAMES[Math.floor(kind / 9)]));
+    }
     return t;
   }
 
@@ -151,10 +162,10 @@
     $('info').textContent = `第 ${view.roundNo} 局 / 共 ${view.rounds} 局 · 庄家：${seatName(view.dealer)} · 牌墙剩 ${r.wall} 张`;
     if (!canDiscard()) selectedKind = -1;
 
-    // 自己在下方，下家在右，对家在上，上家在左
-    const boxes = ['seat-bottom', 'seat-right', 'seat-top', 'seat-left'];
-    for (let i = 0; i < 4; i++) {
-      const rel = (i - me + 4) % 4;
+    // 三人：自己在下方，下家在右，上家在左
+    const boxes = ['seat-bottom', 'seat-right', 'seat-left'];
+    for (let i = 0; i < 3; i++) {
+      const rel = (i - me + 3) % 3;
       $(boxes[rel]).replaceChildren(seatContent(i));
     }
     renderCenter();
@@ -162,9 +173,15 @@
     renderHint();
   }
 
-  function meldTiles(group, m) {
-    const n = m.type === 'pong' ? 3 : 4;
-    for (let k = 0; k < n; k++) group.append(tileEl(m.kind, { small: true }));
+  function seatTags(i) {
+    const r = view.round;
+    const frag = [];
+    if (view.dealer === i) frag.push(el('span', 'tag dealer', '庄'));
+    if (r.missing[i] !== null && r.missing[i] !== undefined) {
+      frag.push(el('span', `tag ${MISSING_CLASS[r.missing[i]]}`, `缺${SUIT_NAMES[r.missing[i]]}`));
+    }
+    if (r.opened[i]) frag.push(el('span', 'tag open', '明牌'));
+    return frag;
   }
 
   function seatContent(i) {
@@ -175,13 +192,14 @@
     const who = el('div', 'who' + (r.turn === i && r.phase !== 'over' ? ' turn' : ''));
     who.append(el('b', null, seatName(i)));
     who.append(el('span', 'score', String(view.scores[i])));
-    if (view.dealer === i) who.append(el('span', 'dealer', '庄'));
+    seatTags(i).forEach((t) => who.append(t));
     frag.append(who);
 
     const melds = el('div', 'tiles small');
     for (const m of r.melds[i]) {
       const g = el('span', 'meld-group');
-      meldTiles(g, m);
+      const n = m.type === 'pong' ? 3 : 4;
+      for (let k = 0; k < n; k++) g.append(tileEl(m.kind, { small: true }));
       melds.append(g);
     }
     if (r.melds[i].length) frag.append(melds);
@@ -207,14 +225,18 @@
         hand.append(t);
       });
       frag.append(hand);
+    } else if (r.openHands && r.openHands[i]) {
+      // 明牌：所有人都能看到这家的手牌
+      const shown = el('div', 'tiles small open-hand');
+      r.openHands[i].forEach((k) => shown.append(tileEl(k, { small: true })));
+      frag.append(shown);
     } else if (r.phase === 'over' && r.result && r.result.revealed) {
-      const shown = el('div', 'tiles small');
+      const shown = el('div', 'tiles small open-hand');
       r.result.revealed[i].forEach((k) => shown.append(tileEl(k, { small: true })));
       frag.append(shown);
     } else {
-      const backs = el('div', 'tiles small');
-      const n = r.handCounts[i];            // 暗牌张数（不含明牌）
-      for (let k = 0; k < n; k++) backs.append(tileEl(0, { small: true, back: true }));
+      const backs = el('div', 'tiles small open-hand');
+      for (let k = 0; k < r.handCounts[i]; k++) backs.append(tileEl(0, { small: true, back: true }));
       frag.append(backs);
     }
     return frag;
@@ -238,7 +260,7 @@
       c.append(el('div', 'muted', `${seatName(r.last[0])} 打出`));
       c.append(tileEl(r.last[1]));
     } else {
-      c.append(el('div', 'muted', '牌局开始'));
+      c.append(el('div', 'muted', r.phase === 'ding' ? '定缺阶段' : '牌局开始'));
     }
   }
 
@@ -252,10 +274,20 @@
     const r = view.round;
     const bar = $('actions');
     bar.replaceChildren();
+    if (r.phase === 'ding') {
+      if (r.missing[view.you] === null || r.missing[view.you] === undefined) {
+        for (let s = 0; s < 3; s++) {
+          bar.append(btn(`定缺${SUIT_NAMES[s]}`, '', () => send({ type: 'ding', suit: s })));
+        }
+      }
+      return;
+    }
     if (r.phase === 'discard' && r.turn === view.you) {
       for (const o of r.self) {
         if (o.action === 'hu') {
           bar.append(btn('自摸和牌', 'hu', () => send({ type: 'self', action: 'hu' })));
+        } else if (o.action === 'open') {
+          bar.append(btn('明牌', 'open', () => send({ type: 'self', action: 'open' })));
         } else {
           const label = o.action === 'gang_an' ? '暗杠' : '加杠';
           bar.append(btn(`${label} ${tileName(o.kind)}`, '', () => send({ type: 'self', action: o.action, kind: o.kind })));
@@ -272,7 +304,12 @@
   function renderHint() {
     const r = view.round;
     let text = '';
-    if (r.phase === 'discard') {
+    if (r.phase === 'ding') {
+      const mine = r.missing[view.you];
+      text = (mine === null || mine === undefined)
+        ? '请选一门缺门：缺门的牌要先打光，才能和牌（20 秒内不选，自动替你选）'
+        : '已定缺，等待其他人…';
+    } else if (r.phase === 'discard') {
       if (r.turn === view.you) {
         text = selectedKind >= 0 ? '再点一次这张牌，就打出去' : '轮到你出牌：点一张牌选中，再点一次打出';
       } else if (view.seats[r.turn] && view.seats[r.turn].bot) {
@@ -309,7 +346,7 @@
       card.append(el('p', 'win-line', '流局：牌墙摸完，无人和牌'));
     }
     for (const w of res.winners) {
-      const how = w.selfDraw ? '自摸' : `胡牌（${seatName(res.from)} 放炮）`;
+      const how = w.selfDraw ? '自摸' : `点炮（${seatName(res.from)} 放炮）`;
       card.append(el('p', 'win-line', `${seatName(w.seat)} ${how}：${w.fan} 番`));
       card.append(el('p', 'detail', w.items.map(([n, v]) => `${n} ${v} 番`).join('，')));
     }
@@ -322,7 +359,7 @@
       head.append(th);
     });
     table.append(head);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       const tr = el('tr');
       tr.append(el('td', null, seatName(i)));
       tr.append(el('td', 'num', (res.deltas[i] > 0 ? '+' : '') + res.deltas[i]));

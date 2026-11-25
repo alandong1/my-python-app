@@ -1,4 +1,4 @@
-"""麻将：页面能打开，和电脑玩能开局并打完一局，多人能进同一个房间。"""
+"""湖北卡五星：页面能打开，和电脑玩能开局并打完一局，多人能进同一个房间。"""
 import pytest
 
 from projects.mahjong import room as room_mod
@@ -40,13 +40,19 @@ def test_solo_game_plays_a_full_round_to_the_end(client):
     with client.websocket_connect("/apps/mahjong/ws") as ws:
         ws.send_json({"type": "solo", "name": "测试", "rounds": 1})
         state = None
-        for _ in range(3000):
+        dinged = False
+        for _ in range(4000):
             state = next_state(ws)
             if state["state"] in ("round_end", "match_end"):
                 break
             rnd = state["round"]
-            if rnd["phase"] == "discard" and rnd["turn"] == state["you"]:
-                if any(o["action"] == "hu" for o in rnd["self"]):
+            if rnd["phase"] == "ding":
+                if not dinged:
+                    ws.send_json({"type": "ding", "suit": 0})
+                    dinged = True
+            elif rnd["phase"] == "discard" and rnd["turn"] == state["you"]:
+                hu = [o for o in rnd["self"] if o["action"] == "hu"]
+                if hu:
                     ws.send_json({"type": "self", "action": "hu"})
                 else:
                     ws.send_json({"type": "discard", "kind": rnd["hand"][-1]})
@@ -54,7 +60,8 @@ def test_solo_game_plays_a_full_round_to_the_end(client):
                 ws.send_json({"type": "claim", "action": "pass"})
         assert state["state"] == "match_end"
         assert sum(state["scores"]) == 0
-        assert len(state["seats"]) == 4 and all(s["bot"] for s in state["seats"][1:])
+        assert len(state["seats"]) == 3
+        assert [s["bot"] for s in state["seats"][1:]] == [True, True]
 
 
 def test_hidden_hands_of_others_are_not_sent(client):
@@ -64,10 +71,11 @@ def test_hidden_hands_of_others_are_not_sent(client):
         rnd = state["round"]
         assert len(rnd["hand"]) == 14
         assert rnd["handCounts"][0] == 14
+        assert rnd["openHands"] == [None, None, None]
         assert "hands" not in rnd
 
 
-def test_two_humans_share_a_room(client):
+def test_two_humans_and_a_computer_share_a_room(client):
     with client.websocket_connect("/apps/mahjong/ws") as host:
         host.send_json({"type": "create", "name": "房主", "rounds": 4})
         code = host.receive_json()["code"]
@@ -85,7 +93,32 @@ def test_two_humans_share_a_room(client):
             started = next_state(host)
             assert started["state"] == "playing"
             assert all(s is not None for s in started["seats"])
-            assert [s["bot"] for s in started["seats"]] == [False, False, True, True]
+            assert [s["bot"] for s in started["seats"]] == [False, False, True]
+
+
+def test_third_human_is_refused_only_when_room_is_full_of_humans(client):
+    """三人版：房间里已经有三名真人，第四个人加入会被拒绝。"""
+    sockets = []
+    try:
+        ws0 = client.websocket_connect("/apps/mahjong/ws").__enter__()
+        sockets.append(ws0)
+        ws0.send_json({"type": "create", "name": "a", "rounds": 1})
+        code = ws0.receive_json()["code"]
+        next_state(ws0)
+        for name in ("b", "c"):
+            ws = client.websocket_connect("/apps/mahjong/ws").__enter__()
+            sockets.append(ws)
+            ws.send_json({"type": "join", "code": code, "name": name})
+            ws.receive_json()
+            next_state(ws)
+        ws3 = client.websocket_connect("/apps/mahjong/ws").__enter__()
+        sockets.append(ws3)
+        ws3.send_json({"type": "join", "code": code, "name": "d"})
+        msg = ws3.receive_json()
+        assert msg["type"] == "error" and "房间已满" in msg["text"]
+    finally:
+        for ws in reversed(sockets):
+            ws.__exit__(None, None, None)
 
 
 def test_joining_unknown_room_reports_error(client):
