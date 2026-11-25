@@ -872,11 +872,13 @@ class Game:
             self._msg(p, f"吃了{C.ITEMS[item]}：饱食 +{hunger}")
 
     def equip(self, p: Player, item: str) -> None:
-        """穿上或脱下武器、防具（再点一次就脱下）。装备不会消耗。"""
+        """穿上或脱下：武器（剑）、工具（斧子、镐子、锄头、鱼叉）、防具。再点一次就脱下。装备不会消耗。"""
         if item in C.WEAPONS:
             slot = "weapon"
         elif item in C.ARMORS:
             slot = "armor"
+        elif item in C.TOOLS:
+            slot = "tool"                       # 手里拿的工具（一次只能拿一件）
         else:
             raise GameError("这个东西不能装备")
         if p.inv.get(item, 0) < 1:
@@ -1191,7 +1193,8 @@ class Game:
                 "events": msgs, "house": p.house, "equip": dict(p.equip),
             },
             "players": [[q.id, q.name, q.role, round(q.x, 2), round(q.z, 2), q.dead, q.sick,
-                         q.work["kind"] if q.work else ""]
+                         q.work["kind"] if q.work else "",
+                         q.equip.get("weapon") or q.equip.get("tool") or ""]
                         for q in self.players.values() if q.house == p.house],
         }
         if p.house is not None:

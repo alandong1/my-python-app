@@ -207,6 +207,7 @@ function initScene() {
   shared.pickHead = new THREE.BoxGeometry(0.34, 0.07, 0.07);
   shared.spearShaft = new THREE.BoxGeometry(0.05, 1.5, 0.05);
   shared.swordBlade = new THREE.BoxGeometry(0.08, 0.6, 0.03);
+  shared.hoeHead = new THREE.BoxGeometry(0.3, 0.06, 0.12);
   shared.metal = new THREE.MeshStandardMaterial({ color: '#9aa3ab', roughness: 0.4, metalness: 0.6 });
 }
 
@@ -481,29 +482,26 @@ function makeAnimal(kind) {
 function makePlayer(p) {
   const [id, name, r] = p;
   const g = new THREE.Group();
-  const torso = new THREE.Group();          // 上半身：弯腰、挥手都是转它
+  const torso = new THREE.Group();          // 上半身：弯腰的时候整个转动
   const body = new THREE.Mesh(shared.body, new THREE.MeshStandardMaterial({ color: ROLE_COLOR[r] || 0xffffff, roughness: 0.6 }));
   body.position.y = 0.45;
   const head = new THREE.Mesh(shared.head, shared.skin);
   head.position.y = 1.15;
-  // 右手：肩膀是转轴，手里拿着工具（只显示正在用的那个）
-  const arm = new THREE.Group();
-  arm.position.set(0.32, 0.95, 0);
-  const hand = new THREE.Mesh(shared.arm, shared.skin);
-  hand.position.y = -0.3;
-  arm.add(hand);
-  const tools = {
+  // 两只手：右手拿工具，左手也能一起握住（双手工具）
+  const armR = makeArm(0.32), armL = makeArm(-0.32);
+  // 手里能拿的东西（同一时间只显示一件）
+  const held = {
     sword: toolMesh([shared.swordBlade, 0, -0.62, 0.1], shared.wood, shared.metal),
     axe: toolMesh([shared.axeHead, 0, -0.62, 0.1], shared.wood, shared.metal),
     pick: toolMesh([shared.pickHead, 0, -0.62, 0.1], shared.wood, shared.metal),
+    hoe: toolMesh([shared.hoeHead, 0, -0.62, 0.1], shared.wood, shared.metal),
     spear: toolMesh(null, shared.wood, shared.metal),
   };
-  tools.spear.children[0].geometry = shared.spearShaft;   // 鱼叉用长杆
-  tools.spear.children[0].position.set(0, 0, 0.1);
-  tools.spear.position.set(0, -0.35, 0.25);
-  tools.spear.rotation.x = Math.PI / 2;
-  for (const t of Object.values(tools)) { t.visible = false; arm.add(t); }
-  torso.add(body, head, arm);
+  held.spear.children[0].geometry = shared.spearShaft;   // 鱼叉用长杆
+  held.spear.children[0].position.set(0, 0, 0.1);
+  held.spear.rotation.x = Math.PI / 2;
+  for (const t of Object.values(held)) { t.visible = false; armR.add(t); }
+  torso.add(body, head, armR, armL);
   g.add(torso);
   if (id === myId) {
     const ring = new THREE.Mesh(shared.ring, shared.ringMat);
@@ -512,15 +510,21 @@ function makePlayer(p) {
     g.add(ring);
   }
   g.add(nameTag(name));
-  g.userData.torso = torso;
-  g.userData.arm = arm;
-  g.userData.tools = tools;
-  g.userData.phase = (id * 0.37) % 6.28;      // 每个人的动作节奏不一样
-  g.userData.swing = 0;
+  g.userData = { torso, armR, armL, held, swingR: 0, swingL: 0, phase: (id * 0.37) % 6.28 };
   return cast(g);
 }
 
-// 工具：柄 + 头（斧子、镐子）
+// 一只手：肩膀是转轴，手臂是一根长方体
+function makeArm(x) {
+  const arm = new THREE.Group();
+  arm.position.set(x, 0.95, 0);
+  const hand = new THREE.Mesh(shared.arm, shared.skin);
+  hand.position.y = -0.3;
+  arm.add(hand);
+  return arm;
+}
+
+// 工具：柄 + 头（斧子、镐子、剑等）
 function toolMesh(headSpec, handleMat, headMat) {
   const g = new THREE.Group();
   const handle = new THREE.Mesh(shared.handle, handleMat);
@@ -535,39 +539,64 @@ function toolMesh(headSpec, handleMat, headMat) {
   return g;
 }
 
-// 动作动画：根据别人（和自己）正在做的事，挥手、弯腰、刺
-const ARM_REST = 0;
-function animatePlayer(mesh, t, dt, hasWeapon = false) {
+// 物品 → 手里显示哪一种工具模型
+function heldKey(item) {
+  if (!item) return '';
+  if (item.endsWith('sword')) return 'sword';
+  if (item.endsWith('axe')) return 'axe';
+  if (item.endsWith('pick')) return 'pick';
+  if (item === 'hoe') return 'hoe';
+  if (item === 'spear') return 'spear';
+  return '';
+}
+
+// 动作动画：砍树（抡斧子）、挖矿（双手抡镐子）、采集（按植物不同：草丛伸手、芦苇扫过去、贝壳蘑菇蹲下捡）、
+// 攻击（前刺）、钓鱼（手伸向海面）。站着的时候两只手自然摆动。
+function animatePlayer(mesh, t, dt, heldItem) {
   const d = mesh.userData;
   if (!d.torso) return;
   const act = d.act || '';
   const ph = d.phase;
   const ease = Math.min(1, dt * 12);
-  let armTarget = ARM_REST, torsoTarget = 0;
-  const tools = d.tools;
-  const show = { sword: false, axe: false, pick: false, spear: false };
-  if (act === 'tree') {                       // 砍树：举起斧子，用力劈下
-    const s = (Math.sin(t * 5 + ph) + 1) / 2;
-    armTarget = -1.9 + 1.9 * s;
-    show.axe = true;
-  } else if (act === 'rock') {                // 采石：镐子大幅度地砸
-    const s = (Math.sin(t * 4 + ph) + 1) / 2;
-    armTarget = -2.2 + 2.2 * s;
-    show.pick = true;
-  } else if (act === 'bush' || act === 'herb' || act === 'reed' || act === 'shell' || act === 'mushroom') {
-    torsoTarget = 0.85;                       // 采集：弯下腰伸手去拿
-    armTarget = 0.5 + 0.15 * Math.sin(t * 3 + ph);
-  } else if (act === 'animal') {              // 攻击：往前一刺
-    armTarget = -1.3 + 0.9 * Math.max(0, Math.sin(t * 9 + ph));
-    show.spear = false;
-  } else if (act === 'fish') {                // 钓鱼：手伸向海面
-    armTarget = -1.1 + 0.06 * Math.sin(t * 2 + ph);
+  const s01 = (k) => (Math.sin(t * k + ph) + 1) / 2;
+  let R = Math.sin(t * 2 + ph) * 0.05, L = -R, torso = 0;     // 站着：两手轻轻摆
+  let show = heldKey(heldItem);
+  if (act === 'tree') {                       // 砍树：双手举起斧子，用力劈下
+    show = 'axe';
+    R = -1.9 + 1.9 * s01(5);
+    L = R * 0.92 + 0.08;
+  } else if (act === 'rock') {                // 挖矿：双手抡镐子，砸得比砍树重
+    show = 'pick';
+    R = -2.2 + 2.2 * s01(4);
+    L = R * 0.92 + 0.08;
+  } else if (act === 'bush' || act === 'herb') {  // 采草丛、草本：弯腰，两手往下够
+    show = '';
+    torso = 0.55 + 0.1 * s01(2.5);
+    R = 1.15 + 0.2 * s01(3);
+    L = R;
+  } else if (act === 'reed') {                // 割芦苇：站着，双手横着一扫一扫
+    show = '';
+    R = -0.1 + 0.9 * Math.sin(t * 3 + ph);
+    L = R * 0.9;
+  } else if (act === 'shell' || act === 'mushroom') {  // 捡贝壳、蘑菇：蹲下，一只手伸下去
+    show = '';
+    torso = 0.8;
+    R = 1.3 + 0.1 * s01(2);
+    L = 0.2;
+  } else if (act === 'animal') {              // 攻击动物：往前一刺
+    R = -1.3 + 0.9 * Math.max(0, Math.sin(t * 9 + ph));
+    L = R * 0.6;
+  } else if (act === 'fish') {                // 钓鱼：右手伸向海面
+    show = '';
+    R = -1.2 + 0.05 * Math.sin(t * 2 + ph);
+    L = -0.2;
   }
-  d.swing += (armTarget - d.swing) * ease;
-  d.arm.rotation.x = d.swing;
-  d.torso.rotation.x += (torsoTarget - d.torso.rotation.x) * ease;
-  if (hasWeapon && (act === '' || act === 'animal')) show.sword = true;
-  for (const k of Object.keys(show)) tools[k].visible = show[k];
+  d.swingR += (R - d.swingR) * ease;
+  d.swingL += (L - d.swingL) * ease;
+  d.armR.rotation.x = d.swingR;
+  d.armL.rotation.x = d.swingL;
+  d.torso.rotation.x += (torso - d.torso.rotation.x) * ease;
+  for (const k of Object.keys(d.held)) d.held[k].visible = (k === show);
 }
 
 function nameTag(text) {
@@ -733,6 +762,7 @@ function applyState(s) {
     pushSample(mesh, x, z);
     mesh.userData.dead = p[5];
     mesh.userData.act = p[7] || '';
+    mesh.userData.heldItem = p[8] || '';
   }
   removeMissing(players, seen);
   $('survivors').textContent = `岛上幸存者：${s.players.length} 人 · ` +
@@ -1033,14 +1063,53 @@ const USABLE = {
 };
 
 // 背包：默认收起成一个小按钮，点开才显示列表。屋里的家具可以直接放下。
+let invTab = 'bag';                  // 'bag' 背包 | 'gear' 装备
 function setInventory(inv, inside) {
   const entries = Object.entries(inv);
   $('invCount').textContent = entries.length ? `(${entries.length})` : '';
-  const key = JSON.stringify(inv) + inside;
+  const equip = me.equip || {};
+  const key = JSON.stringify(inv) + inside + invTab + JSON.stringify(equip);
   if (key === lastInvKey) return;
   lastInvKey = key;
+  for (const b of document.querySelectorAll('#invTabs button')) b.classList.toggle('on', b.dataset.tab === invTab);
   const ul = $('inv');
   ul.replaceChildren();
+  if (invTab === 'gear') {
+    // 装备：手里的工具、武器、防具。点「装备」穿上，点「卸下」拿下来。
+    for (const [slot, label] of [['tool', '手里的工具'], ['weapon', '武器'], ['armor', '防具']]) {
+      const li = document.createElement('li');
+      const cur = equip[slot];
+      li.append(document.createTextNode(`${label}：${cur ? info.items[cur] : '（空）'}`));
+      if (cur) {
+        const btn = document.createElement('button');
+        btn.textContent = '卸下';
+        btn.dataset.equip = cur;
+        li.append(btn);
+      }
+      ul.append(li);
+    }
+    const wearable = entries.filter(([item]) => info.weapons.includes(item) || info.armors.includes(item) || info.tools.includes(item));
+    if (!wearable.length) {
+      const li = document.createElement('li');
+      li.textContent = '（背包里没有可以装备的工具、武器和防具）';
+      ul.append(li);
+    }
+    for (const [item, n] of wearable) {
+      const li = document.createElement('li');
+      li.append(document.createTextNode(`${info.items[item]} × ${n}`));
+      const on = Object.values(equip).includes(item);
+      if (!on) {
+        const btn = document.createElement('button');
+        btn.textContent = '装备';
+        btn.dataset.equip = item;
+        li.append(btn);
+      } else {
+        li.append(document.createTextNode('（已装备）'));
+      }
+      ul.append(li);
+    }
+    return;
+  }
   if (!entries.length) {
     const li = document.createElement('li');
     li.textContent = '（空）';
@@ -1061,13 +1130,6 @@ function setInventory(inv, inside) {
       const btn = document.createElement('button');
       btn.textContent = '放';
       btn.dataset.place = item;
-      li.append(btn);
-    } else if (info.weapons.includes(item) || info.armors.includes(item)) {
-      const on = Object.values(me.equip || {}).includes(item);
-      li.append(document.createTextNode(on ? '（装备中）' : ''));
-      const btn = document.createElement('button');
-      btn.textContent = on ? '卸下' : '装备';
-      btn.dataset.equip = item;
       li.append(btn);
     }
     ul.append(li);
@@ -1291,9 +1353,13 @@ function setupInput() {
   $('menuClose').addEventListener('click', closeMenu);
   $('menu').addEventListener('click', (e) => { if (e.target.id === 'menu') closeMenu(); });
 
+  for (const b of document.querySelectorAll('#invTabs button')) {
+    b.addEventListener('click', () => { invTab = b.dataset.tab; lastInvKey = ''; setInventory(me.inv, me.house !== null); });
+  }
   $('invToggle').addEventListener('click', () => {
     const open = $('inv').hidden;                       // 原来收着 → 展开
     $('inv').hidden = !open;
+    $('invTabs').hidden = !open;
     $('invArrow').textContent = open ? '▾' : '▸';
   });
   $('inv').addEventListener('click', (e) => {
@@ -1374,7 +1440,7 @@ function frame(now) {
     if (Math.abs(s.vx) + Math.abs(s.vz) > 1e-4) mesh.rotation.y = Math.atan2(s.vx, s.vz);
     const target = mesh.userData.dead ? Math.PI / 2 : 0;
     mesh.rotation.z += (target - mesh.rotation.z) * Math.min(1, dt * 10);
-    animatePlayer(mesh, t, dt, mesh === players.get(myId) && !!(me.equip && me.equip.weapon));
+    animatePlayer(mesh, t, dt, mesh === players.get(myId) ? (me.equip.weapon || me.equip.tool || '') : (mesh.userData.heldItem || ''));
   }
   for (const mesh of animals.values()) {
     const s = sampleAt(mesh, renderT);
