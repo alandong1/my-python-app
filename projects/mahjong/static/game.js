@@ -206,7 +206,8 @@
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }
 
-  let targeting = null;   // 使用技能时选目标：{ item, opp? }
+  let targeting = null;   // 使用道具时选目标：{ item, opp? }
+  let showItems = false;  // 是否展开「使用道具」的列表
 
   function seatName(i) {
     const s = view && view.seats[i];
@@ -306,6 +307,7 @@
 
   function renderTable() {
     const r = view.round;
+    if (!(r.phase === 'discard' && r.turn === view.you && r.drawKind !== null)) showItems = false;
     const me = view.you;
     const suitText = r.suits.map((s) => SUIT_NAMES[s]).join('、');
     $('info').textContent = `第 ${view.roundNo} 局 / 共 ${view.rounds} 局 · 本局 ${suitText} + 中发白 · 庄家：${seatName(view.dealer)} · 牌墙剩 ${r.wall} 张`;
@@ -360,6 +362,7 @@
         t.classList.add('clickable');
         t.onclick = () => {
           send({ type: 'item', item: targeting.item, kind: k, src: i });
+          showItems = false;
           targeting = null;
         };
       }
@@ -379,6 +382,7 @@
           t.classList.add('clickable');
           t.onclick = () => {
             send({ type: 'item', item: targeting.item, kind: k, opp: targeting.opp });
+            showItems = false;
             targeting = null;
           };
         } else if (clickable) {
@@ -461,8 +465,8 @@
       }
       bar.append(btn('过', 'pass', () => send({ type: 'claim', action: 'pass' })));
     }
-    // 摸完牌之后：使用技能（每局每个只能用一次）
-    if (r.phase === 'discard' && r.turn === view.you && r.drawKind !== null && view.items && view.items.length) {
+    // 摸完牌之后：「使用道具」按钮；不点就直接打牌（点一张手牌）
+    if (r.phase === 'discard' && r.turn === view.you && r.drawKind !== null && r.items && r.items.length) {
       if (targeting && targeting.item === 'steal' && targeting.opp === undefined) {
         // 釜底抽薪：先选对手
         for (const seat of [0, 1, 2]) {
@@ -473,16 +477,18 @@
           }));
         }
         bar.append(btn('取消', 'pass', () => { targeting = null; renderTable(); }));
-      } else if (!targeting) {
-        for (const o of view.items) {
+      } else if (targeting) {
+        bar.append(btn('取消', 'pass', () => { targeting = null; renderTable(); }));
+      } else if (!showItems) {
+        bar.append(btn('使用道具', 'item', () => { showItems = true; renderTable(); }));
+      } else {
+        for (const o of r.items) {
           bar.append(btn(`使用${o.name}`, 'item', () => {
-            if (o.item === 'steal') targeting = { item: 'steal' };
-            else targeting = { item: o.item };
+            targeting = { item: o.item };
             renderTable();
           }));
         }
-      } else {
-        bar.append(btn('取消', 'pass', () => { targeting = null; renderTable(); }));
+        bar.append(btn('不用道具', 'pass', () => { showItems = false; renderTable(); }));
       }
     }
   }
