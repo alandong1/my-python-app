@@ -436,23 +436,6 @@ function nameSprite(text) {
   sp.position.y = 2.25;
   return sp;
 }
-// 对方头顶的气泡：「如果我……，你该如何应对？」
-function bubbleSprite(text) {
-  const c = document.createElement('canvas');
-  c.width = 640; c.height = 150;
-  const g = c.getContext('2d');
-  g.fillStyle = 'rgba(255,255,255,0.95)';
-  g.beginPath(); g.roundRect(6, 6, 628, 110, 18); g.fill();
-  g.beginPath(); g.moveTo(300, 116); g.lineTo(320, 146); g.lineTo(340, 116); g.fill();
-  g.fillStyle = '#1d2733'; g.font = 'bold 40px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(text, 320, 61);
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
-  sp.scale.set(7.0, 1.64, 1);
-  sp.position.y = 3.2;
-  sp.userData.text = text;
-  return sp;
-}
-
 function limb(radius, length, color, castShadow = true) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.9, length, 10), mat(color));
   m.position.y = -length / 2;
@@ -461,6 +444,9 @@ function limb(radius, length, color, castShadow = true) {
 }
 
 const figures = new Map();   // 座位号 -> 小人的各个部件和动画状态
+let speech = null;           // 现在谁在说话：{seat, text}
+const speechEl = $('speech');
+const headV = new THREE.Vector3();
 
 function makeFigure(seat) {
   const root = new THREE.Group();          // 整个人：位置在这里，朝向网
@@ -634,19 +620,8 @@ function applyState(state) {
   for (const [idx, f] of figures) {
     if (!state.seats[idx]) { scene.remove(f.root); figures.delete(idx); }
   }
-  // 气泡：只在对方击球之后、他的那一拍结束之前显示
-  for (const f of figures.values()) {
-    const seatIdx = [...figures.entries()].find(([, v]) => v === f)[0];
-    const b = state.bubble && state.bubble.seat === seatIdx ? state.bubble.text : null;
-    if (b && f.bubble?.userData.text !== b) {
-      if (f.bubble) f.root.remove(f.bubble);
-      f.bubble = bubbleSprite(b);
-      f.root.add(f.bubble);
-    } else if (!b && f.bubble) {
-      f.root.remove(f.bubble);
-      f.bubble = null;
-    }
-  }
+  // 说的话：只在对方击球之后、他的那一拍结束之前显示（画在屏幕上，跟着他的小人走）
+  speech = state.bubble ? { seat: state.bubble.seat, text: state.bubble.text } : null;
   for (const ev of state.events) {
     if (ev.type === 'shot') startShot(ev);
     if (ev.type === 'point') pointEffects(ev);
@@ -824,6 +799,25 @@ function frame(now) {
   camera.position.lerp(camPos, 0.2);
   camLook.set(0, 0.6, 0);
   camera.lookAt(camLook);
+  camera.updateMatrixWorld();
+
+  // 说话框：贴在说话的小人头顶
+  const sp = speech && figures.get(speech.seat);
+  if (sp) {
+    headV.set(sp.x, 2.7, sp.z).project(camera);
+    const w = renderer.domElement.clientWidth || window.innerWidth;
+    const h = renderer.domElement.clientHeight || window.innerHeight;
+    const sx = (headV.x + 1) / 2 * w;
+    const sy = (1 - headV.y) / 2 * h;
+    if (speechEl.textContent !== speech.text) speechEl.textContent = speech.text;
+    speechEl.hidden = false;
+    // 框要完整地留在屏幕里（按框的实际宽度来限制中心点）
+    const half = speechEl.offsetWidth / 2;
+    speechEl.style.left = `${Math.min(w - half - 8, Math.max(half + 8, sx))}px`;
+    speechEl.style.top = `${Math.max(56, sy - 6)}px`;
+  } else {
+    speechEl.hidden = true;
+  }
 
   renderer.render(scene, camera);
 }
