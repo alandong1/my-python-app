@@ -39,7 +39,7 @@
   // 筒子：按麻将牌的标准排法摆圆点（坐标系 100 × 140）
   const DOT_LAYOUT = {
     1: [[50, 70]],
-    2: [[50, 48], [50, 92]],
+    2: [[32, 40], [68, 100]],
     3: [[32, 40], [50, 70], [68, 100]],
     4: [[32, 44], [68, 44], [32, 96], [68, 96]],
     5: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]],
@@ -51,10 +51,18 @@
 
   function dotFace(n) {
     const r = n === 1 ? 26 : (n <= 3 ? 16 : (n <= 6 ? 13 : 10));
-    const dots = DOT_LAYOUT[n].map(([x, y]) => (
-      `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${BLUE}" stroke-width="3.5"/>` +
-      `<circle cx="${x}" cy="${y}" r="${r * 0.55}" fill="none" stroke="${RED}" stroke-width="3"/>`
-    )).join('');
+    const dots = DOT_LAYOUT[n].map(([x, y], i) => {
+      // 1 筒是同心圆：中间红、中间绿、外圈蓝；5 筒的中间一点是红色
+      if (n === 1) {
+        return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${BLUE}" stroke-width="4"/>` +
+          `<circle cx="${x}" cy="${y}" r="${r * 0.62}" fill="none" stroke="${GREEN}" stroke-width="4"/>` +
+          `<circle cx="${x}" cy="${y}" r="${r * 0.28}" fill="${RED}"/>`;
+      }
+      const isCenterRed = n === 5 && i === 2;
+      const ring = isCenterRed ? RED : BLUE;
+      return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${ring}" stroke-width="3.5"/>` +
+        `<circle cx="${x}" cy="${y}" r="${r * 0.55}" fill="none" stroke="${isCenterRed ? RED : GREEN}" stroke-width="3"/>`;
+    }).join('');
     return `<svg viewBox="0 0 100 140" aria-hidden="true">${dots}</svg>`;
   }
 
@@ -63,20 +71,21 @@
     2: { w: 16, h: 80, pos: [[36, 70], [64, 70]] },
     3: { w: 16, h: 46, pos: [[50, 40], [34, 100], [66, 100]] },
     4: { w: 16, h: 46, pos: [[34, 44], [66, 44], [34, 100], [66, 100]] },
-    5: { w: 15, h: 44, pos: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]] },
+    5: { w: 15, h: 44, pos: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]], redIndex: 2 },
     6: { w: 13, h: 50, pos: [[30, 46], [50, 46], [70, 46], [30, 96], [50, 96], [70, 96]] },   // 三列两行的竖条
     7: { w: 14, h: 24, pos: [[50, 28], [34, 60], [66, 60], [34, 92], [66, 92], [34, 124], [66, 124]] },
-    8: { w: 13, h: 22, pos: [[34, 30], [34, 56], [34, 82], [34, 108], [66, 30], [66, 56], [66, 82], [66, 108]] },
+    8: { w: 11, h: 42, pos: [[20, 48], [40, 48], [60, 48], [80, 48], [20, 98], [40, 98], [60, 98], [80, 98]] },
     9: { w: 13, h: 26, pos: [[30, 34], [50, 34], [70, 34], [30, 70], [50, 70], [70, 70], [30, 106], [50, 106], [70, 106]] },
   };
 
-  function stickSvg(x, y, w, h) {
-    // 竹子：绿色圆角竿，带两道竹节
+  function stickSvg(x, y, w, h, red) {
+    // 竹子：圆角竿，带两道竹节；红色的那根是 5 条中间的红竹
+    const body = red ? RED : '#2e8b57';
     const lines = [0.33, 0.66].map((f) => {
       const ly = y + h * f;
       return `<line x1="${x + 1.5}" y1="${ly}" x2="${x + w - 1.5}" y2="${ly}" stroke="#c8f0d4" stroke-width="2"/>`;
     }).join('');
-    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${w / 2}" fill="#2e8b57" stroke="#0f4d28" stroke-width="2"/>${lines}`;
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${w / 2}" fill="${body}" stroke="#0f4d28" stroke-width="2"/>${lines}`;
   }
 
   function peacockSvg() {
@@ -103,7 +112,7 @@
   function bambooFace(n) {
     if (n === 1) return peacockSvg();
     const L = BAMBOO_LAYOUT[n];
-    const sticks = L.pos.map(([cx, cy]) => stickSvg(cx - L.w / 2, cy - L.h / 2, L.w, L.h)).join('');
+    const sticks = L.pos.map(([cx, cy], i) => stickSvg(cx - L.w / 2, cy - L.h / 2, L.w, L.h, i === L.redIndex)).join('');
     return `<svg viewBox="0 0 100 140" aria-hidden="true">${sticks}</svg>`;
   }
 
