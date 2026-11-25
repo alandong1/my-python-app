@@ -223,19 +223,19 @@ def score_win(hand: Sequence[int], melds: List[dict], self_draw: bool,
 
     翻数表（每翻分数翻一倍，底分 1 分）：
       屁胡 0 翻（不翻）
-      七对 2 翻
-      四归一（七对里有一种牌 4 张，4 张都要组成两对，不能杠出去）：
-        暗四归一 2 翻：4 张都是暗牌，胡牌时不是最后一张
-        明四归一 1 翻：胡的那张正好是第 4 张（从别人打出的牌来的）
-      龙七对 = 七对 + 四归一；双龙七对（两种牌都是四归一）额外再 1 翻
+      七对 2 翻；龙七对 = 七对 + 每个四归一；双龙七对（两种四归一）再 1 翻
+      四归一：手里有四张一样的牌，没有杠出去，四张都组成牌型（如二二二 + 二三四）
+        暗四归一 2 翻：四张都是暗牌
+        明四归一 1 翻：其中一张是碰来的（有一组碰）
       清一色 2 翻（只有一门数牌，没有字牌）
       自摸 1 翻；明牌 1 翻
+    杠不加番（杠的钱在别处结算）。
 
-    hand 是和牌时的暗牌计数（包含胡的那张），melds 是明牌列表，
-    win_kind 是点炮和牌时别人打出的那张（自摸为 None）。
+    hand 是和牌时的暗牌计数（包含胡的那张），melds 是明牌列表。
     返回 (总翻数, [(名目, 翻数), ...], 大胡翻数)。
     大胡翻数只算牌型本身（七对、四归一、双龙、清一色），不含自摸和明牌，
     它决定能不能点炮：大胡翻数至少 2，或者已经明牌，才能点炮。
+    win_kind 保留参数，目前不用。
     """
     items: List[Tuple[str, int]] = []
     pattern = 0
@@ -243,16 +243,20 @@ def score_win(hand: Sequence[int], melds: List[dict], self_draw: bool,
         items.append(("七对", 2))
         pattern += 2
         quads = [k for k in range(KINDS) if hand[k] == 4]
-        for k in quads:
-            if win_kind == k and not self_draw:
-                items.append(("明四归一", 1))
-                pattern += 1
-            else:
-                items.append(("暗四归一", 2))
-                pattern += 2
+        for _ in quads:
+            items.append(("暗四归一", 2))
+            pattern += 2
         if len(quads) == 2:
             items.append(("双龙七对", 1))
             pattern += 1
+    else:
+        for k in range(KINDS):
+            if hand[k] == 4:
+                items.append(("暗四归一", 2))
+                pattern += 2
+            elif hand[k] == 1 and any(m["type"] == "pong" and m["kind"] == k for m in melds):
+                items.append(("明四归一", 1))
+                pattern += 1
     if _one_suit(hand, melds):
         items.append(("清一色", 2))
         pattern += 2

@@ -206,14 +206,13 @@ class Round:
         c = self.hands[seat]
         if self._can_win(seat, None, True):
             opts.append({"action": "hu", "kind": None})
-        if self.opened[seat]:
-            return opts                                       # 明牌之后只能摸打，不能再杠
         for k in range(R.KINDS):
             if c[k] == 4:
-                opts.append({"action": "gang_an", "kind": k})  # 暗杠
-        for m in self.melds[seat]:
-            if m["type"] == "pong" and c[m["kind"]] > 0:
-                opts.append({"action": "gang_jia", "kind": m["kind"]})
+                opts.append({"action": "gang_an", "kind": k})  # 暗杠（明牌后也可以）
+        if not self.opened[seat]:                             # 明牌之后不能加杠（明杠）
+            for m in self.melds[seat]:
+                if m["type"] == "pong" and c[m["kind"]] > 0:
+                    opts.append({"action": "gang_jia", "kind": m["kind"]})
         return opts
 
     def visible(self) -> List[int]:
@@ -343,16 +342,18 @@ class Round:
         if action == "gang_an":
             self.hands[seat][kind] -= 4
             self.melds[seat].append({"type": "gang_an", "kind": kind, "from": None})
+            pay = 2                          # 暗杠：每家当场付 2 分
         else:                                # gang_jia：碰升级成杠
             self.hands[seat][kind] -= 1
             for m in self.melds[seat]:
                 if m["type"] == "pong" and m["kind"] == kind:
                     m["type"] = "gang_jia"
                     break
-        for o in range(N_PLAYERS):           # 暗杠、加杠：其余每家付 1 分
+            pay = 1                          # 加杠：每家当场付 1 分
+        for o in range(N_PLAYERS):
             if o != seat:
-                self.gang_pay[o] -= 1
-                self.gang_pay[seat] += 1
+                self.gang_pay[o] -= pay
+                self.gang_pay[seat] += pay
         self.drawn = False
         self._draw_for(seat)                 # 杠后补牌
 

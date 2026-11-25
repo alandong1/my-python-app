@@ -118,11 +118,20 @@ def test_quad_in_seven_pairs_counts_as_four_kind():
     assert fan == 4 and pattern == 4
 
 
-def test_quad_completed_by_discard_is_ming_four_kind():
-    c = R.counts_of([0, 0, 0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10])
-    fan, items, pattern = R.score_win(c, [], False, win_kind=0)   # 胡的正好是第 4 张
-    assert ("明四归一", 1) in items and ("暗四归一", 2) not in items
-    assert fan == 4 - 1 and pattern == 3
+def test_ming_four_kind_when_one_tile_was_ponged():
+    """明四归一：一张是碰来的（有一组碰），手里还有一张，两张组成顺子。"""
+    melds = [{"type": "pong", "kind": 0, "from": 2}]
+    c = R.counts_of([0, 1, 2, 3, 4, 5, 9, 9, 9, 27, 27])      # 手里一万 + 123万 + 456万 + 111条 + 中中
+    fan, items, pattern = R.score_win(c, melds, False)
+    assert ("明四归一", 1) in items and pattern == 1
+
+
+def test_concealed_four_kind_in_standard_hand():
+    """暗四归一：四张二万都在手里，二二二 + 二三四。"""
+    c = R.counts_of([1, 1, 1, 1, 2, 3, 9, 9, 9, 18, 18, 18, 27, 27])
+    assert R.is_win(c, 0)
+    fan, items, pattern = R.score_win(c, [], False)
+    assert ("暗四归一", 2) in items and pattern == 2
 
 
 def test_two_quads_is_double_dragon_seven_pairs():

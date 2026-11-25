@@ -208,7 +208,7 @@ def test_concealed_gang_is_allowed_for_four_identical_tiles():
     assert {"action": "gang_an", "kind": 4} in r.self_options(0)
     r.act_self(0, "gang_an", 4)
     assert r.melds[0] == [{"type": "gang_an", "kind": 4, "from": None}]
-    assert r.gang_pay == [2, -1, -1]
+    assert r.gang_pay == [4, -2, -2]         # 暗杠：每家当场付 2 分
     assert r.phase == "discard" and r.drawn is True
 
 
@@ -314,3 +314,16 @@ def test_match_history_is_json_ready_for_scoreboard():
     assert len(entry["deltas"]) == 3 and sum(entry["deltas"]) == 0
     if entry["type"] == "win":
         assert entry["winners"][0]["items"] and entry["winners"][0]["hand"]
+
+
+def test_opened_player_may_concealed_kong_but_not_added_kong():
+    r = Round(0, random.Random(23))
+    set_hands(r, [[5] * 4 + [18, 19, 20, 21, 22, 23, 24, 25, 26], [13] * 13, [14] * 13])
+    r.melds[0] = [{"type": "pong", "kind": 7, "from": 1}]
+    r.hands[0][7] = 1
+    r.opened[0] = True
+    r.turn = 0
+    r.drawn = True
+    actions = [(o["action"], o["kind"]) for o in r.self_options(0)]
+    assert ("gang_an", 5) in actions
+    assert all(a != "gang_jia" for a, _ in actions)
