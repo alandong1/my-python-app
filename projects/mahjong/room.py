@@ -262,6 +262,7 @@ class Room:
             "scores": m.scores if m else None,
             "roundNo": m.round_no if m else 0,
             "dealer": m.dealer if m else None,
+            "history": m.history if m else [],
         }
         if m is not None:
             r = m.round

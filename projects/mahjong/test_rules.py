@@ -104,14 +104,26 @@ def test_honor_breaks_one_suit():
     assert all(name != "清一色" for name, _ in items)
 
 
-def test_ming_four_is_one_fan_and_an_four_is_two():
-    c = R.counts_of([0, 1, 2, 3, 4, 5, 6, 7, 8, 27, 27, 27, 28, 28])
-    ming = [{"type": "gang_ming", "kind": 4, "from": 1}]
-    fan, items, pattern = R.score_win(c, ming, False)
-    assert ("明四归一", 1) in items and pattern == 1
-    an = [{"type": "gang_an", "kind": 4, "from": None}]
-    fan, items, pattern = R.score_win(c, an, False)
-    assert ("暗四归一", 2) in items and pattern == 2
+def test_quad_in_seven_pairs_counts_as_four_kind():
+    # 七对，其中 0（一万）有 4 张，都要组成两对
+    c = R.counts_of([0, 0, 0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10])
+    fan, items, pattern = R.score_win(c, [], False, win_kind=2)   # 胡的不是那张第 4 张
+    assert ("七对", 2) in items and ("暗四归一", 2) in items
+    assert fan == 4 and pattern == 4
+
+
+def test_quad_completed_by_discard_is_ming_four_kind():
+    c = R.counts_of([0, 0, 0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10])
+    fan, items, pattern = R.score_win(c, [], False, win_kind=0)   # 胡的正好是第 4 张
+    assert ("明四归一", 1) in items and ("暗四归一", 2) not in items
+    assert fan == 4 - 1 and pattern == 3
+
+
+def test_two_quads_is_double_dragon_seven_pairs():
+    c = R.counts_of([0, 0, 0, 0, 2, 2, 2, 2, 4, 4, 6, 6, 8, 8])
+    fan, items, pattern = R.score_win(c, [], True)
+    assert ("双龙七对", 1) in items
+    assert [name for name, _ in items].count("暗四归一") == 2
 
 
 def test_expand_round_trip():

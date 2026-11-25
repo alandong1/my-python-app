@@ -36,21 +36,21 @@
   const NUM_CH = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
   const RED = '#b3262b', GREEN = '#1b7a3d', BLUE = '#1f4e9c';
 
-  // 筒子的圆点位置（按麻将牌的常见排法）
+  // 筒子：按麻将牌的标准排法摆圆点（坐标系 100 × 140）
   const DOT_LAYOUT = {
     1: [[50, 70]],
-    2: [[50, 45], [50, 95]],
-    3: [[50, 30], [50, 70], [50, 110]],
-    4: [[32, 45], [68, 45], [32, 95], [68, 95]],
+    2: [[50, 48], [50, 92]],
+    3: [[32, 40], [50, 70], [68, 100]],
+    4: [[32, 44], [68, 44], [32, 96], [68, 96]],
     5: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]],
     6: [[32, 36], [68, 36], [32, 70], [68, 70], [32, 104], [68, 104]],
-    7: [[50, 32], [32, 60], [68, 60], [32, 86], [68, 86], [32, 112], [68, 112]],
-    8: [[32, 34], [68, 34], [50, 56], [32, 78], [68, 78], [50, 100], [32, 118], [68, 118]],
-    9: [[30, 32], [50, 32], [70, 32], [30, 70], [50, 70], [70, 70], [30, 108], [50, 108], [70, 108]],
+    7: [[32, 34], [68, 34], [32, 70], [50, 70], [68, 70], [32, 106], [68, 106]],
+    8: [[32, 34], [68, 34], [32, 62], [68, 62], [32, 90], [68, 90], [32, 118], [68, 118]],
+    9: [[30, 36], [50, 36], [70, 36], [30, 70], [50, 70], [70, 70], [30, 104], [50, 104], [70, 104]],
   };
 
   function dotFace(n) {
-    const r = n === 1 ? 26 : (n <= 3 ? 14 : (n <= 6 ? 12 : 9));
+    const r = n === 1 ? 26 : (n <= 3 ? 16 : (n <= 6 ? 13 : 10));
     const dots = DOT_LAYOUT[n].map(([x, y]) => (
       `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="${BLUE}" stroke-width="3.5"/>` +
       `<circle cx="${x}" cy="${y}" r="${r * 0.55}" fill="none" stroke="${RED}" stroke-width="3"/>`
@@ -58,37 +58,53 @@
     return `<svg viewBox="0 0 100 140" aria-hidden="true">${dots}</svg>`;
   }
 
-  // 条子：n 根竹子，1 条是一只鸡（妖姬）
+  // 条子：按标准排法摆竹子；一条是一只孔雀
+  const BAMBOO_LAYOUT = {
+    2: { w: 16, h: 80, pos: [[36, 70], [64, 70]] },
+    3: { w: 16, h: 46, pos: [[50, 40], [34, 100], [66, 100]] },
+    4: { w: 16, h: 46, pos: [[34, 44], [66, 44], [34, 100], [66, 100]] },
+    5: { w: 15, h: 44, pos: [[32, 40], [68, 40], [50, 70], [32, 100], [68, 100]] },
+    6: { w: 14, h: 28, pos: [[34, 36], [66, 36], [34, 70], [66, 70], [34, 104], [66, 104]] },
+    7: { w: 14, h: 24, pos: [[50, 28], [34, 60], [66, 60], [34, 92], [66, 92], [34, 124], [66, 124]] },
+    8: { w: 13, h: 22, pos: [[34, 30], [34, 56], [34, 82], [34, 108], [66, 30], [66, 56], [66, 82], [66, 108]] },
+    9: { w: 13, h: 26, pos: [[30, 34], [50, 34], [70, 34], [30, 70], [50, 70], [70, 70], [30, 106], [50, 106], [70, 106]] },
+  };
+
+  function stickSvg(x, y, w, h) {
+    // 竹子：绿色圆角竿，带两道竹节
+    const lines = [0.33, 0.66].map((f) => {
+      const ly = y + h * f;
+      return `<line x1="${x + 1.5}" y1="${ly}" x2="${x + w - 1.5}" y2="${ly}" stroke="#c8f0d4" stroke-width="2"/>`;
+    }).join('');
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${w / 2}" fill="#2e8b57" stroke="#0f4d28" stroke-width="2"/>${lines}`;
+  }
+
+  function peacockSvg() {
+    // 一条：孔雀。身子绿色，尾羽展开，有红色眼斑，头上有红冠。
+    let tail = '';
+    const fan = [-62, -40, -18, 4, 26];
+    fan.forEach((a, i) => {
+      const col = i % 2 ? '#1b7a3d' : '#2b6cb0';
+      tail += `<ellipse cx="42" cy="58" rx="7" ry="34" fill="${col}" stroke="#0f4d28" stroke-width="1.5" transform="rotate(${a} 42 90)"/>` +
+        `<circle cx="${42 + 30 * Math.sin((a * Math.PI) / 180)}" cy="${90 - 30 * Math.cos((a * Math.PI) / 180)}" r="4.5" fill="#f2b53a" stroke="#0f4d28" stroke-width="1"/>`;
+    });
+    return `<svg viewBox="0 0 100 140" aria-hidden="true">
+      ${tail}
+      <ellipse cx="54" cy="92" rx="18" ry="22" fill="#1b7a3d" stroke="#0f4d28" stroke-width="2"/>
+      <path d="M68 62 q10 -14 16 -2 q-4 4 -4 8 z" fill="#2b6cb0"/>
+      <circle cx="70" cy="58" r="10" fill="#1b7a3d" stroke="#0f4d28" stroke-width="2"/>
+      <path d="M64 48 l-3 -8 l5 4 l1 -7 l4 6 l3 -5 l0 8 z" fill="${RED}"/>
+      <circle cx="74" cy="56" r="2.6" fill="#fff"/><circle cx="74.6" cy="56" r="1.2" fill="#111"/>
+      <path d="M80 60 l8 3 l-8 3 z" fill="#e0a526"/>
+      <path d="M50 110 l-3 16 M60 110 l3 16" stroke="#e0a526" stroke-width="3"/>
+    </svg>`;
+  }
+
   function bambooFace(n) {
-    if (n === 1) {
-      return `<svg viewBox="0 0 100 140" aria-hidden="true">
-        <ellipse cx="50" cy="82" rx="30" ry="24" fill="${GREEN}"/>
-        <path d="M30 72 Q10 60 12 40 Q30 52 40 66 Z" fill="${RED}"/>
-        <circle cx="66" cy="50" r="15" fill="${GREEN}"/>
-        <path d="M60 36 q6 -10 12 0 q6 -8 10 2 q-8 4 -22 2 z" fill="${RED}"/>
-        <path d="M80 52 l10 4 l-10 4 z" fill="#e0a526"/>
-        <circle cx="70" cy="48" r="2.5" fill="#fff"/>
-        <path d="M40 104 l-4 22 M56 104 l4 22" stroke="#e0a526" stroke-width="4"/>
-      </svg>`;
-    }
-    const cols = n <= 3 ? n : Math.ceil(Math.sqrt(n));
-    const rows = Math.ceil(n / cols);
-    const w = cols === 1 ? 26 : (cols === 2 ? 22 : 18);
-    const h = rows === 1 ? 92 : (rows === 2 ? 52 : 36);
-    let out = '';
-    for (let i = 0; i < n; i++) {
-      const c = i % cols;
-      const rr = Math.floor(i / cols);
-      const cellW = 100 / cols, cellH = 140 / rows;
-      const x = cellW * c + cellW / 2 - w / 2;
-      const y = cellH * rr + cellH / 2 - h / 2;
-      out += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${w / 2}" fill="${GREEN}" stroke="#0f4d28" stroke-width="2.5"/>`;
-      for (let j = 1; j < 4; j++) {
-        const ly = y + (h * j) / 4;
-        out += `<line x1="${x + 2}" y1="${ly}" x2="${x + w - 2}" y2="${ly}" stroke="#a8e6bd" stroke-width="2"/>`;
-      }
-    }
-    return `<svg viewBox="0 0 100 140" aria-hidden="true">${out}</svg>`;
+    if (n === 1) return peacockSvg();
+    const L = BAMBOO_LAYOUT[n];
+    const sticks = L.pos.map(([cx, cy]) => stickSvg(cx - L.w / 2, cy - L.h / 2, L.w, L.h)).join('');
+    return `<svg viewBox="0 0 100 140" aria-hidden="true">${sticks}</svg>`;
   }
 
   // 万子：大号数字（汉字）加一个「萬」
@@ -211,7 +227,10 @@
     $('room').classList.toggle('hidden', !room);
     $('table').classList.toggle('hidden', !table);
     if (room) renderRoom();
-    if (table) renderTable();
+    if (table) {
+      renderTable();
+      renderScoreboard();
+    }
     renderOverlay();
   }
 
@@ -392,6 +411,44 @@
       text = r.claim && r.claim.length ? '有人打出了一张牌：可以碰、杠或胡（超时自动过）' : '等待其他玩家表态…';
     }
     $('hint').textContent = text;
+  }
+
+  // ------------------------------------------------------------ 计分板
+
+  function renderScoreboard() {
+    const list = $('score-list');
+    list.replaceChildren();
+    const hist = view.history || [];
+    if (!hist.length) {
+      list.append(el('p', 'muted', '还没有完成的局。'));
+      return;
+    }
+    for (const h of hist.slice().reverse()) {
+      const row = el('details', 'round-row');
+      const sum = el('summary');
+      if (h.type === 'draw') {
+        sum.textContent = `第 ${h.round} 局：流局`;
+      } else {
+        const w = h.winners[0];
+        const how = w.selfDraw ? '自摸' : `点炮（${seatName(h.from)} 放炮）`;
+        const fanText = w.fan ? `${w.fan} 翻` : '屁胡';
+        sum.textContent = `第 ${h.round} 局：${seatName(w.seat)} ${how}，${fanText}，${w.points} 分`;
+      }
+      row.append(sum);
+
+      const body = el('div', 'round-body');
+      for (const w of h.winners) {
+        const names = w.items.length ? w.items.map(([n, v]) => `${n} ${v} 翻`).join('，') : '屁胡（不翻）';
+        body.append(el('p', 'win-line', `${seatName(w.seat)} 胡牌：${names}`));
+        const hand = el('div', 'tiles small open-hand');
+        w.hand.forEach((k) => hand.append(tileEl(k, { small: true })));
+        body.append(hand);
+      }
+      body.append(el('p', 'detail', '分数变化：' + [0, 1, 2]
+        .map((i) => `${seatName(i)} ${h.deltas[i] > 0 ? '+' : ''}${h.deltas[i]}`).join('，')));
+      row.append(body);
+      list.append(row);
+    }
   }
 
   // ------------------------------------------------------------ 一局结束 / 整场结束

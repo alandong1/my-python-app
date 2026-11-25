@@ -179,17 +179,16 @@ def test_gang_ming_draws_replacement_and_pays_discarder():
     assert r.turn == 1 and r.phase == "discard" and r.drawn is True
 
 
-def test_concealed_gang_pays_each_other_player():
+def test_concealed_gang_is_not_allowed():
+    """四张一样的牌要留在手里做四归一，不能暗杠。"""
     r = Round(0, random.Random(12))
     set_hands(r, [[4] * 4 + [18, 19, 20, 21, 22, 23, 24, 25, 26],
                   [0] * 13, [1] * 13])
     r.turn = 0
     r.drawn = True
-    assert {"action": "gang_an", "kind": 4} in r.self_options(0)
-    r.act_self(0, "gang_an", 4)
-    assert r.melds[0] == [{"type": "gang_an", "kind": 4, "from": None}]
-    assert r.gang_pay == [2, -1, -1]
-    assert r.phase == "discard" and r.drawn is True
+    assert not any(o["action"] == "gang_an" for o in r.self_options(0))
+    with pytest.raises(GameError):
+        r.act_self(0, "gang_an", 4)
 
 
 def test_bad_actions_raise_and_change_nothing():
@@ -264,3 +263,33 @@ def test_computer_players_finish_a_round(seed):
     assert sum(r.result["deltas"]) == 0
     for w in r.result["winners"]:
         assert w["fan"] >= 1
+
+
+def test_match_history_is_json_ready_for_scoreboard():
+    import json
+    m = Match(rounds=1, rng=random.Random(31))
+    m.begin_round()
+    r = m.round
+    while r.phase != "over":
+        if r.phase == "discard":
+            seat = r.turn
+            opts = [o for o in r.self_options(seat) if o["action"] != "open"]
+            act, kind = ai.decide_self(r.hands[seat], len(r.melds[seat]), r.visible(), opts)
+            if act == "discard":
+                r.discard(seat, kind)
+            elif act == "hu":
+                r.act_self(seat, "hu")
+            else:
+                r.act_self(seat, act, kind)
+        else:
+            for t in list(r.pending):
+                if r.phase == "claim" and t not in r.responses:
+                    r.respond(t, ai.decide_claim(r.hands[t], len(r.melds[t]), r.visible(),
+                                                 r.pending[t], r.last[1]))
+    m.record()
+    assert len(m.history) == 1
+    entry = json.loads(json.dumps(m.history))[0]
+    assert entry["round"] == 1 and entry["type"] in ("win", "draw")
+    assert len(entry["deltas"]) == 3 and sum(entry["deltas"]) == 0
+    if entry["type"] == "win":
+        assert entry["winners"][0]["items"] and entry["winners"][0]["hand"]

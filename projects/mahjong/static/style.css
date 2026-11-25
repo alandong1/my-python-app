@@ -285,3 +285,12 @@ button.small { padding: 6px 10px; font-size: 14px; }
   .center { min-height: 80px; }
   .panel { margin: 16px auto; }
 }
+
+/* ---------------- 计分板 ---------------- */
+.scoreboard { margin-top: 14px; background: rgba(0, 0, 0, .25); border-radius: 10px; padding: 8px 12px; }
+.scoreboard > summary { cursor: pointer; font-size: 15px; color: var(--accent); padding: 4px 0; }
+.round-row { border-top: 1px solid rgba(255, 255, 255, .12); padding: 6px 0; }
+.round-row > summary { cursor: pointer; font-size: 14px; padding: 4px 0; }
+.round-body { padding: 6px 0 4px 8px; font-size: 14px; }
+.round-body p { margin: 4px 0; }
+.round-body .open-hand { margin: 4px 0; }
