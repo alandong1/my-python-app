@@ -1,13 +1,15 @@
-"""网球的游戏核心：抽象的回合制选择。
+"""网球的游戏核心：抽象的回合制选择（2026-11-26 版）。
 
-玩法（2026-11-25 起）：不模拟球的物理。每次球到了一个人的面前，这个人从三个选项里
-选一个怎么打；选项决定小人站到哪里、球落到对面哪里，以及失败时是下网还是出界。
-选项成功率不一样：「好选择」约 80%，另外两个约 35%。来回进行，直到有人失分。
+玩法：
+- 对方一击球，你就开始选。对方头顶会显示他刚打的那一拍（「如果我上网，你该如何应对？」）。
+- 每次给你三个选项（打法 + 落点）。三个里至少一个是克制对方这一拍的「好选择」。
+- 好选择成功率高，其余选项容易失误。失误的球直接判这一分。
+- 小人会跑到来球落点的位置去接球，击球动作和落点都和选择的打法一致。
+
+站位：depth（back 后场 / mid 中场 / front 前场）× lane（1 一区 / 2 二区）。
+一区、二区按世界坐标固定（以球场中线为界）。
 
 所有判定都在服务器算。这里**不碰网络**，只做计算，所以可以直接用测试检查。
-服务器每秒检查 30 次计时器（选择时限、动画、一分结束后的停顿），前端只负责显示。
-
-站位（zone）：back 后场、mid 中场、net 网前。队 0 在 x<0 一侧，队 1 在 x>0 一侧。
 """
 from __future__ import annotations
 
@@ -22,57 +24,80 @@ AI_ID = -1                 # 电脑座位的「用户 id」（不会和真实用
 AI_NAME = "电脑"
 AI_THINK = 1.2             # 电脑想多久再选（秒）
 AI_BEST_P = 0.7            # 电脑有这么大的概率选「好选择」，其余时间随机选
-MENU_TIME = 12.0           # 人类玩家的选择时限（秒），超时就随机选
-SHOT_TIME = 1.6            # 击球动画的时长（秒）
+MENU_TIME = 12.0           # 玩家的选择时限（秒），超时就随机选
+WINDUP = 0.35              # 选完后到挥拍的最短时间（秒）
 POINT_PAUSE = 2.2          # 一分结束后的停顿（秒）
+FLIGHT = 1.0               # 普通球飞过来的时间（秒）
+FLIGHT_HIGH = 1.4          # 高球、发球飞过来的时间（秒）
 
-BEST_P = 0.8               # 「好选择」（选项和对方站位配合）的成功率
-FALLBACK_P = 0.6           # 三个选项里没有对口的，随机挑一个当好选择，成功率稍低
-OTHER_P = 0.35             # 其余选项的成功率
-SERVE_OTHER_P = 0.55       # 发球时其余发球的成功率（发球比对打稳一些）
-WINNER_P = 0.3             # 截击、高压成功时，直接得分的概率
+BEST_P = 0.88              # 好选择（克制对方这一拍）的成功率
+FALLBACK_P = 0.72          # 没有克制选项时，随机挑一个当好选择的成功率
+OTHER_P = 0.62             # 其余选项的成功率
+SERVE_BEST_P = 0.90        # 发球的好选择成功率
+SERVE_OTHER_P = 0.70       # 发球的其余成功率
+WINNER_P = 0.08            # 高压、截击成功时直接得分的概率
 
-# 选项：zone 击球后小人站的位置；next 成功后对方面对的局面；fail 失败的结果
-OPTIONS: Dict[str, dict] = {
-    "flat":   dict(name="深球（平击）", desc="打到对方后场，最常用", zone="back", next="deep", fail="out"),
-    "top":    dict(name="上旋深球", desc="球会下沉，落点稳", zone="back", next="deep", fail="out"),
-    "slice":  dict(name="切削", desc="低而慢的球，逼对方失误", zone="mid", next="short", fail="net"),
-    "drop":   dict(name="小球", desc="轻轻放在网前，逼对方跑上来", zone="mid", next="short", fail="net"),
-    "lob":    dict(name="高挑", desc="高高挑过对方头顶", zone="back", next="lob", fail="out"),
-    "volley": dict(name="上网截击", desc="冲到网前，在空中截住球", zone="net", next="deep", fail="net", winner=True),
-    "smash":  dict(name="高压", desc="跳起来重扣后场", zone="net", next="deep", fail="rand", winner=True),
-    "serve_flat":  dict(name="平发", desc="速度快，但容易失误", zone="back", next="deep", fail="fault"),
-    "serve_top":   dict(name="上旋发球", desc="稳一些，弹起来偏高", zone="back", next="deep", fail="fault"),
-    "serve_slice": dict(name="切发球", desc="角度刁，落点偏短", zone="back", next="short", fail="fault"),
+DEPTH_NAME = {"back": "后场", "mid": "中场", "front": "前场"}
+LANE_NAME = {1: "一区", 2: "二区"}
+DEPTH_X = {"back": 10.6, "mid": 7.0, "front": 3.4}   # 站位对应的距离（队 0 在 x<0 一侧）
+LANE_Z = {1: -2.3, 2: 2.3}                             # 一区、二区对应的左右位置
+
+# 打法。attack：这一拍对对方来说是什么（用来找克制）；action：气泡里的说法
+# lane：same 同一区 / opp 另一区 / any 任选；fail：失败的结果；arc：球的弧线；anim：击球动作
+KINDS: Dict[str, dict] = {
+    "straight":     dict(name="直线", action="打直线", attack="deep", depths=["back"], lane="same", fail="out", arc="normal", recover="back", anim="fore", winner=False),
+    "cross":        dict(name="反斜线", action="打反斜线", attack="deep", depths=["back"], lane="opp", fail="out", arc="normal", recover="back", anim="fore", winner=False),
+    "short_cross":  dict(name="小斜线", action="打小斜线", attack="short_cross", depths=["front", "mid"], lane="opp", fail="net", arc="low", recover="mid", anim="drop", winner=False),
+    "drop":         dict(name="小球", action="打小球", attack="drop", depths=["front"], lane="any", fail="net", arc="low", recover="mid", anim="drop", winner=False),
+    "lob":          dict(name="挑高", action="挑高", attack="lob", depths=["back"], lane="any", fail="out", arc="high", recover="back", anim="lob", winner=False),
+    "smash":        dict(name="高压", action="高压", attack="smash", depths=["back", "mid"], lane="any", fail="rand", arc="high", recover="front", anim="smash", winner=True),
+    "volley":       dict(name="截击", action="截击", attack="volley", depths=["mid"], lane="any", fail="net", arc="normal", recover="front", anim="volley", winner=True),
+    "short_volley": dict(name="截短", action="截短", attack="short_cross", depths=["front"], lane="any", fail="net", arc="normal", recover="front", anim="volley", winner=False),
+    "deep_volley":  dict(name="截长", action="截长", attack="volley", depths=["back"], lane="any", fail="out", arc="normal", recover="front", anim="volley", winner=False),
+    "slice":        dict(name="切削", action="切削", attack="slice", depths=["mid"], lane="any", fail="net", arc="low", recover="mid", anim="slice", winner=False),
+    "topspin":      dict(name="上旋", action="上旋", attack="topspin", depths=["back"], lane="any", fail="out", arc="normal", recover="back", anim="fore", winner=False),
+    "flat":         dict(name="平击深球", action="平击深球", attack="deep", depths=["back"], lane="any", fail="out", arc="normal", recover="back", anim="fore", winner=False),
+    "approach":     dict(name="上网", action="上网", attack="approach", depths=["back", "mid"], lane="any", fail="net", arc="normal", recover="front", anim="fore", winner=False),
 }
-# 局面 → 可以给的选项（每次从里面挑三个）
-POOLS: Dict[str, List[str]] = {
-    "deep": ["flat", "top", "slice", "drop", "lob"],     # 球落在我方后场
-    "short": ["volley", "drop", "lob", "flat", "slice"],  # 对方来了短球
-    "lob": ["smash", "flat", "volley"],                   # 对方挑高过来
+# 发球。attack 是对方要面对的这一拍；发球落点永远在对角的那一区
+SERVES: Dict[str, dict] = {
+    "serve_flat":  dict(name="平发", action="发平球", attack="deep", depth="back", arc="normal", fail="fault", anim="serve"),
+    "serve_top":   dict(name="上旋发球", action="发上旋球", attack="topspin", depth="back", arc="normal", fail="fault", anim="serve"),
+    "serve_slice": dict(name="切发球", action="发切削球", attack="slice", depth="mid", arc="low", fail="fault", anim="serve"),
 }
-SERVE_IDS = ["serve_flat", "serve_top", "serve_slice"]
-ARC_OPTIONS = {"lob", "smash", "serve_top"}   # 这些球要飞高弧线
-ZONE_X = {"back": 10.6, "mid": 7.0, "net": 2.6}
+SERVE_IDS = list(SERVES)
+
+# 克制表：对方这一拍（attack）→ 能克制它的打法（好选择从这里挑）
+COUNTERS: Dict[str, List[str]] = {
+    "approach": ["lob", "straight", "cross"],
+    "drop": ["short_volley", "volley"],
+    "short_cross": ["short_volley", "approach"],
+    "volley": ["lob", "straight", "cross", "deep_volley"],
+    "lob": ["smash"],
+    "smash": ["topspin"],
+    "deep": ["drop", "short_cross"],
+    "topspin": ["slice", "short_cross"],
+    "slice": ["topspin", "approach"],
+}
 
 
 class RoomError(Exception):
     """玩家的操作不合法（给玩家看的中文提示）。"""
 
 
-def tactical_best(situation: str, opp_zone: str) -> Optional[str]:
-    """和局面、对方站位配合的「好选择」。没有对口的返回 None。"""
-    if situation == "deep":
-        if opp_zone == "net":
-            return "lob"      # 对方在网前，挑过头顶
-        if opp_zone == "back":
-            return "drop"     # 对方在后场，放小球
-        return "flat"         # 对方在中场，打深球
-    if situation == "short":
-        return "volley"       # 来了短球，冲上去截击
-    if situation == "lob":
-        return "smash"        # 高球，高压
-    return None
+def allowed_kind(kind: str, attack: str) -> bool:
+    """这一拍之后，这种打法能不能用（例如只有对方挑高，才能高压）。"""
+    if kind == "smash":
+        return attack == "lob"
+    if kind in ("volley", "short_volley", "deep_volley"):
+        return attack in ("drop", "short_cross", "approach", "volley")
+    if kind == "approach":
+        return attack in ("deep", "topspin", "slice", "short_cross", "drop")
+    return True
+
+
+def other_lane(lane: int) -> int:
+    return 3 - lane
 
 
 @dataclass
@@ -81,9 +106,9 @@ class Seat:
     team: int
     user_id: int
     name: str
-    z: float = 0.0            # 同一队两个人时的左右位置（双打）
-    zone: str = "back"        # 当前站位：back / mid / net
-    is_ai: bool = False       # 电脑座位（由服务器操作，规则和真人一样）
+    lane: int = 1              # 站在一区还是二区（接球时会跑到来球那一区）
+    depth: str = "back"        # 站在前场、中场还是后场
+    is_ai: bool = False        # 电脑座位（由服务器操作，规则和真人一样）
 
 
 # ------------------------------------------------------------------ 计分
@@ -167,6 +192,7 @@ class Score:
 
 
 
+
 @dataclass
 class Room:
     id: str
@@ -176,24 +202,29 @@ class Room:
     host_name: str
     seats: List[Optional[Seat]] = field(default_factory=list)
     status: str = "waiting"   # waiting 等待 / playing 进行中 / finished 已结束
-    # 阶段：serve_menu 发球方选 / menu 击球方选 / animating 击球动画 / point_over 一分结束
+    # 阶段：serve_menu 发球方选 / menu 对方击球后，接球方选 / swing 挥拍 / shot 失误的球飞出去 / point_over 一分结束
     phase: str = "idle"
     message: str = ""
-    timer: float = 0.0        # 动画或停顿还剩多久
+    timer: float = 0.0        # 挥拍、飞球或停顿还剩多久
     deadline: float = 0.0     # 选择还剩多久
     score: Score = field(default_factory=Score)
     server_seat: int = 0
     serve_attempt: int = 1
     hitter: Optional[int] = None         # 现在轮到哪个座位选择
-    menu_options: List[str] = field(default_factory=list)
-    menu_best: Optional[str] = None      # 好选择（只在服务器知道）
+    menu_options: List[dict] = field(default_factory=list)
+    menu_best: Optional[str] = None      # 好选择的选项编号（只在服务器知道）
     menu_best_p: float = BEST_P
-    menu_situation: str = "serve"
-    menu_opp_zone: str = "back"
-    pending: Optional[Tuple[int, str]] = None   # 动画结束后要结算的一分：(得分队, 原因)
-    reserve: bool = False                        # 动画结束后要重新发球（一发失误）
-    next_menu: Optional[Tuple[int, str, str]] = None  # 动画结束后轮到的人：(座位, 局面, 对方站位)
+    menu_other_p: float = OTHER_P
+    menu_attack: str = "serve"           # 对方这一拍是什么（用来找克制）
+    menu_elapsed: float = 0.0            # 球已经飞了多久
+    flight: float = FLIGHT               # 这一拍的球要飞多久
+    bubble: Optional[dict] = None        # 对方头顶的气泡：{"seat": 座位, "text": 文字}
+    chosen: Optional[dict] = None        # 玩家选中的选项（挥拍时才结算）
+    next_receiver: Optional[tuple] = None  # 击球成功后，轮到谁接球（等挥拍动画结束再开始）
+    pending: Optional[Tuple[int, str]] = None   # 这一分要结算：(得分队, 原因)
+    reserve: bool = False                        # 一发失误：挥拍结束后重新发球
     last_seat: Optional[int] = None
+    last_shot: Optional[dict] = None
     events: List[dict] = field(default_factory=list)   # 这一帧发生的事（发给前端做动画）
     ai: bool = False                 # 人机房间：2 号位是电脑，只能单打，不出现在大厅
     rng: random.Random = field(default_factory=random.Random)
@@ -221,8 +252,8 @@ class Room:
     def _new_seat(self, index: int, user_id: int, name: str) -> Seat:
         cap = self.capacity
         team = 0 if index < cap // 2 else 1
-        z = 0.0 if cap == 2 else (-2.4 if index % 2 == 0 else 2.4)
-        return Seat(index, team, user_id, name, z=z)
+        lane = 1 if index % 2 == 0 else 2     # 双打时同一队的两个人分在一区和二区
+        return Seat(index, team, user_id, name, lane=lane, depth="back")
 
     def ai_seat(self) -> Optional[Seat]:
         for s in self.seats:
@@ -291,64 +322,109 @@ class Room:
     # -------------------------------------------------- 一分的开始
 
     def _next_point(self):
-        """新的一分：发球方按局轮换，所有人回到后场。"""
+        """新的一分：发球方按局轮换，站在发球位置（一区或二区，由比分决定）。"""
         self.serve_attempt = 1
         order = SERVE_ORDER[self.capacity]
         self.server_seat = order[self.score.total_games % len(order)]
+        server = self.seats[self.server_seat]
         for s in self.seats:
             if s:
-                s.zone = "back"
+                s.depth = "back"
+        # 比分之和为偶数站一区，为奇数站二区（发球落到对角）
+        server.lane = 1 if (self.score.points[0] + self.score.points[1]) % 2 == 0 else 2
         self.pending = None
         self.reserve = False
-        self.next_menu = None
+        self.next_receiver = None
         self.last_seat = None
+        self.last_shot = None
+        self.bubble = None
+        self.chosen = None
         self.ai_timer = 0.0
         self._open_serve_menu()
 
     def _open_serve_menu(self):
         self.phase = "serve_menu"
         self.hitter = self.server_seat
-        self._build_menu("serve", "back")
-        self.deadline = MENU_TIME
-        self.ai_timer = 0.0
-
-    def _open_rally_menu(self, hitter: int, situation: str, opp_zone: str):
-        self.phase = "menu"
-        self.hitter = hitter
-        self._build_menu(situation, opp_zone)
-        self.deadline = MENU_TIME
-        self.ai_timer = 0.0
-
-    def _build_menu(self, situation: str, opp_zone: str):
-        """给击球方三个选项。好选择一定在里面（如果局面有对口的选项）。"""
         rng = self.rng
-        if situation == "serve":
-            options = list(SERVE_IDS)
-            best = rng.choice(SERVE_IDS)
-            best_p = BEST_P
-        else:
-            pool = POOLS[situation]
-            best = tactical_best(situation, opp_zone)
-            if best is not None and best in pool:
-                others = [o for o in pool if o != best]
-                rng.shuffle(others)
-                options = [best] + others[:2]
-                best_p = BEST_P
-            else:
-                options = rng.sample(pool, 3)
-                best = rng.choice(options)
-                best_p = FALLBACK_P
+        options = []
+        best = rng.choice(SERVE_IDS)
+        server_lane = self.seats[self.server_seat].lane
+        for k in SERVE_IDS:
+            spec = SERVES[k]
+            lane = other_lane(server_lane)
+            options.append({"id": k, "kind": k, "depth": spec["depth"], "lane": lane,
+                            "name": f"{spec['name']}·{LANE_NAME[lane]}{DEPTH_NAME[spec['depth']]}",
+                            "desc": f"发到对角{LANE_NAME[lane]}{DEPTH_NAME[spec['depth']]}"})
         rng.shuffle(options)
         self.menu_options = options
         self.menu_best = best
+        self.menu_best_p = SERVE_BEST_P
+        self.menu_other_p = SERVE_OTHER_P
+        self.menu_attack = "serve"
+        self.menu_elapsed = 0.0
+        self.flight = FLIGHT_HIGH
+        self.deadline = MENU_TIME
+        self.bubble = None
+        self.ai_timer = 0.0
+
+    def _open_rally_menu(self, receiver: Seat, attack: str, bubble_text: str,
+                         lane: int, depth: str, flight: float):
+        """对方击球的那一刻：接球方跑向来球的落点，开始选择。"""
+        receiver.lane = lane
+        receiver.depth = depth
+        self.phase = "menu"
+        self.hitter = receiver.index
+        self._build_menu(attack, lane)
+        self.menu_attack = attack
+        self.menu_elapsed = 0.0
+        self.flight = flight
+        self.deadline = MENU_TIME
+        self.bubble = {"seat": self.last_seat, "text": bubble_text}
+        self.ai_timer = 0.0
+
+    def _build_menu(self, attack: str, contact_lane: int):
+        """给接球方三个选项：好选择（克制对方这一拍）+ 两个其他的。"""
+        rng = self.rng
+        pool = [k for k in KINDS if allowed_kind(k, attack)]
+        counters = [k for k in COUNTERS.get(attack, []) if k in pool]
+        if counters:
+            best_kind = rng.choice(counters)
+            best_p = BEST_P
+            chosen = [best_kind]
+        else:
+            best_kind = None
+            best_p = FALLBACK_P
+            chosen = []
+        others = [k for k in pool if k != best_kind]
+        rng.shuffle(others)
+        chosen += others[:3 - len(chosen)]
+        if best_kind is None:
+            best_kind = rng.choice(chosen)
+        rng.shuffle(chosen)
+        options = []
+        for k in chosen:
+            spec = KINDS[k]
+            depth = rng.choice(spec["depths"])
+            if spec["lane"] == "same":
+                lane = contact_lane
+            elif spec["lane"] == "opp":
+                lane = other_lane(contact_lane)
+            else:
+                lane = rng.choice([1, 2])
+            options.append({
+                "id": f"{k}-{depth}-{lane}", "kind": k, "depth": depth, "lane": lane,
+                "name": f"{spec['name']}·{LANE_NAME[lane]}{DEPTH_NAME[depth]}",
+                "desc": f"打到对方{LANE_NAME[lane]}{DEPTH_NAME[depth]}",
+            })
+        self.menu_options = options
+        self.menu_best = next(o["id"] for o in options if o["kind"] == best_kind)
         self.menu_best_p = best_p
-        self.menu_situation = situation
-        self.menu_opp_zone = opp_zone
+        self.menu_other_p = OTHER_P
 
     # -------------------------------------------------- 玩家的操作
 
-    def choose(self, user_id: int, option: str) -> None:
-        """击球方选择一个选项。服务器在这里掷骰子决定成败。"""
+    def choose(self, user_id: int, option_id: str) -> None:
+        """接球方选择一个选项。挥拍时才结算成败（等球飞到为止）。"""
         if self.status != "playing":
             raise RoomError("比赛还没开始")
         seat = self.seat_of(user_id)
@@ -356,71 +432,89 @@ class Room:
             raise RoomError("你不在这个房间里")
         if self.phase not in ("menu", "serve_menu") or seat.index != self.hitter:
             raise RoomError("现在不是你选择的时候")
-        if option not in self.menu_options:
+        opt = next((o for o in self.menu_options if o["id"] == option_id), None)
+        if opt is None:
             raise RoomError("没有这个选项")
-        opt = OPTIONS[option]
-        team = seat.team
+        self.chosen = dict(opt, serve=(self.phase == "serve_menu"))
+        self.phase = "swing"
+        # 球还没飞到的话，要等球到了才挥拍
+        self.timer = max(WINDUP, self.flight - self.menu_elapsed)
 
-        if option == self.menu_best:
-            p = self.menu_best_p
-        else:
-            p = SERVE_OTHER_P if self.phase == "serve_menu" else OTHER_P
+    def _receiver(self, team: int, lane: int) -> Seat:
+        """接球的人：这一队里离来球最近的那个（单打就是唯一的一个）。"""
+        cands = [s for s in self.seats if s and s.team == team]
+        best = min(abs(s.lane - lane) for s in cands)
+        pick = [s for s in cands if abs(s.lane - lane) == best]
+        return self.rng.choice(pick)
+
+    def _resolve(self):
+        """挥拍结束：掷骰子决定成败，发出击球事件，然后轮到对方（或判分）。"""
+        opt = self.chosen
+        self.chosen = None
+        seat = self.seats[self.hitter] if self.hitter is not None else None
+        serve = bool(opt.get("serve"))
+        spec = SERVES[opt["kind"]] if serve else KINDS[opt["kind"]]
+        p = self.menu_best_p if opt["id"] == self.menu_best else self.menu_other_p
+        flight = FLIGHT_HIGH if (spec["arc"] == "high" or serve) else FLIGHT
+        team = seat.team
+        to_team = 1 - team
+
+        result = "ok"
         fail = None
         if self.rng.random() < p:
-            if opt.get("winner") and self.rng.random() < WINNER_P:
+            if not serve and spec.get("winner") and self.rng.random() < WINNER_P:
                 result = "winner"
-            else:
-                result = "ok"
         else:
             result = "fail"
-            fail = opt["fail"]
+            fail = spec["fail"]
             if fail == "rand":
                 fail = self.rng.choice(["net", "out"])
 
-        # 击球的小人跑到选项要求的位置
-        seat.zone = opt["zone"]
-        to_team = 1 - team
-        if result == "ok":
-            to_zone = "back" if opt["next"] in ("deep", "lob") else "mid"
-        elif result == "winner":
-            to_zone = "back"
-        elif fail == "out":
-            to_zone = "far"
-        else:
-            to_zone = "net"
+        # 击球的人跑到打法要求的位置（动画里会挪过去）
+        if not serve:
+            seat.depth = spec["recover"]
 
+        if result == "fail":
+            to_zone = "far" if fail == "out" else "net"
+        else:
+            to_zone = "court"
+
+        self.last_shot = {"seat": self.hitter, "kind": opt["kind"], "name": spec["name"], "action": spec["action"]}
         self.events.append({
-            "type": "shot", "seat": seat.index, "option": option, "name": opt["name"],
-            "result": result, "fail": fail, "toTeam": to_team, "toZone": to_zone,
-            "arc": option in ARC_OPTIONS,
+            "type": "shot", "seat": self.hitter, "kind": opt["kind"], "name": spec["name"],
+            "action": spec["action"], "result": result, "fail": fail, "toTeam": to_team,
+            "toZone": to_zone, "toDepth": opt["depth"], "toLane": opt["lane"],
+            "arc": spec["arc"], "anim": spec["anim"], "flight": flight,
         })
-        self.pending = None
-        self.reserve = False
-        self.next_menu = None
+        self.last_seat = self.hitter
+        self.bubble = None
+
         if result == "winner":
-            self.pending = (team, f"{opt['name']}直接得分")
+            self.pending = (team, f"{spec['name']}直接得分")
         elif result == "fail":
             if fail == "fault":
                 if self.serve_attempt == 1:
                     self.serve_attempt = 2
                     self.reserve = True
-                    self.message = "一发失误，请再发一次"
                     self.events.append({"type": "fault", "reason": "一发失误"})
+                    self.message = "一发失误，请再发一次"
                 else:
                     self.pending = (1 - team, "双发失误")
             else:
                 word = "下网" if fail == "net" else "出界"
-                self.pending = (1 - team, f"{opt['name']}{word}")
-        else:
-            receiver = self._receiver(to_team)
-            self.next_menu = (receiver.index, opt["next"], opt["zone"])
-        self.last_seat = seat.index
-        self.phase = "animating"
-        self.timer = SHOT_TIME
+                self.pending = (1 - team, f"{spec['name']}{word}")
 
-    def _receiver(self, team: int) -> Seat:
-        candidates = [s for s in self.seats if s and s.team == team]
-        return self.rng.choice(candidates)
+        if self.pending is not None or self.reserve:
+            self.phase = "shot"
+            self.timer = flight
+            self.menu_options = []
+            return
+
+        # 成功：轮到对方接球。选择从对方击球的这一刻开始（球还在飞，他就跑过去）。
+        receiver = self._receiver(to_team, opt["lane"])
+        text = f"如果我{spec['action']}，你该如何应对？"
+        self.next_receiver = None
+        self._open_rally_menu(receiver, spec["attack"], text, opt["lane"], opt["depth"], flight)
 
     # -------------------------------------------------- 每一帧
 
@@ -430,13 +524,19 @@ class Room:
         if self.ai:
             self._ai_step(dt)
         if self.phase in ("menu", "serve_menu"):
+            self.menu_elapsed += dt
             seat = self.seats[self.hitter] if self.hitter is not None else None
             if seat and not seat.is_ai:
                 self.deadline -= dt
-                if self.deadline <= 0:       # 超时：随机选一个
-                    self.choose(seat.user_id, self.rng.choice(self.menu_options))
+                if self.deadline <= 0 and self.menu_options:    # 超时：随机选一个
+                    self.choose(seat.user_id, self.rng.choice(self.menu_options)["id"])
             return
-        if self.phase == "animating":
+        if self.phase == "swing":
+            self.timer -= dt
+            if self.timer <= 0:
+                self._resolve()
+            return
+        if self.phase == "shot":
             self.timer -= dt
             if self.timer <= 0:
                 self._finish_shot()
@@ -447,33 +547,34 @@ class Room:
                 self._next_point()
 
     def _finish_shot(self):
-        """击球动画结束：结算一分，或轮到下一个人选择。"""
+        """挥拍的球飞完了：判这一分，或者轮到对方接球，或者重新发球。"""
         if self.pending:
             winner, reason = self.pending
             self._point(winner, reason)
             return
         if self.reserve:
             self.reserve = False
+            self.bubble = None
             self._open_serve_menu()
             return
-        if self.next_menu:
-            hitter, situation, opp_zone = self.next_menu
-            self.next_menu = None
-            self._open_rally_menu(hitter, situation, opp_zone)
+        if self.next_receiver:
+            idx, attack, text, lane, depth, flight = self.next_receiver
+            self.next_receiver = None
+            self._open_rally_menu(self.seats[idx], attack, text, lane, depth, flight)
 
     def _ai_step(self, dt: float):
         """电脑：轮到它选择时，想一会儿再选。大多数时候选好选择。"""
         seat = self.ai_seat()
         if seat is None:
             return
-        if self.phase in ("menu", "serve_menu") and self.hitter == seat.index:
+        if self.phase in ("menu", "serve_menu") and self.hitter == seat.index and self.menu_options:
             self.ai_timer += dt
             if self.ai_timer >= AI_THINK:
                 self.ai_timer = 0.0
                 if self.rng.random() < AI_BEST_P:
                     pick = self.menu_best
                 else:
-                    pick = self.rng.choice(self.menu_options)
+                    pick = self.rng.choice(self.menu_options)["id"]
                 self.choose(AI_ID, pick)
         else:
             self.ai_timer = 0.0
@@ -485,6 +586,7 @@ class Room:
         self.hitter = None
         self.menu_options = []
         self.pending = None
+        self.bubble = None
         team_name = "队伍 A" if winner_team == 0 else "队伍 B"
         self.message = f"{reason}，{team_name} 得分"
         self.events.append({"type": "point", "winner": winner_team, "reason": reason,
@@ -510,11 +612,12 @@ class Room:
         menu = None
         if self.phase in ("menu", "serve_menu") and self.menu_options:
             menu = {
-                "options": [{"id": o, "name": OPTIONS[o]["name"], "desc": OPTIONS[o]["desc"]}
-                            for o in self.menu_options],
-                "situation": self.menu_situation,
-                "oppZone": self.menu_opp_zone,
+                "options": [{"id": o["id"], "name": o["name"], "desc": o["desc"],
+                             "depth": o["depth"], "lane": o["lane"]} for o in self.menu_options],
+                "attack": self.menu_attack,
                 "deadline": round(max(0.0, self.deadline), 2),
+                "flight": self.flight,
+                "elapsed": round(self.menu_elapsed, 2),
             }
         return {
             "type": "state",
@@ -528,9 +631,10 @@ class Room:
             "lastSeat": self.last_seat,
             "score": self.score.to_dict(),
             "menu": menu,
+            "bubble": self.bubble,
             "seats": [None if s is None else {
                 "index": s.index, "team": s.team, "userId": s.user_id, "name": s.name,
-                "isAi": s.is_ai, "zone": s.zone, "z": s.z,
+                "isAi": s.is_ai, "lane": s.lane, "depth": s.depth,
             } for s in self.seats],
             "events": events,
         }

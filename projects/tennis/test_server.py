@@ -140,7 +140,7 @@ def test_match_starts_when_full_and_only_host_can_start(client):
         menu = state["menu"]
         assert menu and len(menu["options"]) == 3
         server_ws.send_json({"type": "choose", "option": menu["options"][0]["id"]})
-        expect(server_ws, "state", where=lambda m: m["phase"] == "animating")
+        expect(server_ws, "state", where=lambda m: m["phase"] == "swing")
 
 
 def test_guest_can_join_but_websocket_needs_login(client):
