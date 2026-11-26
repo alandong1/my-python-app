@@ -154,14 +154,18 @@ def test_store_new_players_start_with_ten_thousand_and_steal_costs_thirty(client
     assert board[0]["points"] >= 10000 - 30
 
 
-def test_opened_player_can_only_discard_the_drawn_tile():
+def test_opened_player_must_keep_tenpai_when_discarding():
+    from projects.mahjong import rules as RR
     r = Round(0, random.Random(30))
-    set_after_draw(r, [[18] * 13 + [1], [13] * 13, [14] * 13], turn=0)
-    r.opened[0] = True
-    other = next(k for k in range(R.KINDS) if r.hands[0][k] and k != r.draw_kind)
+    tenpai13 = [0, 1, 2, 6, 7, 8, 9, 9, 9, 27, 27, 27, 28]          # 听发
+    set_after_draw(r, [[18] * 13, [13] * 13, tenpai13 + [3]], turn=2)
+    r.opened[2] = True
+    safe = r.opened_discards(2)
+    assert 3 in safe                                                 # 打摸到的 4 万，仍然听发
+    breaking = next(k for k in range(RR.KINDS) if r.hands[2][k] and k not in safe)
     with pytest.raises(GameError):
-        r.discard(0, other)
-    r.discard(0, r.draw_kind)                 # 摸到的那张可以打
+        r.discard(2, breaking)                                       # 打破听牌的牌不能打
+    r.discard(2, 3)
     assert r.phase in ("discard", "claim", "over")
 
 

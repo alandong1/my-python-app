@@ -353,10 +353,10 @@ class Room:
             elif any(o["action"] == "hu" for o in opts):
                 act, kind = "hu", -1
             elif r.opened[seat]:
-                # 明牌的人：摸什么打什么（不能打的话，打一张允许的）
-                allowed = r.allowed_discards(seat)
+                # 明牌的人：打出去以后必须仍然听牌。摸到的那张能打就打它，否则打另一张能保持听牌的
+                safe = r.opened_discards(seat) or r.allowed_discards(seat)
                 act = "discard"
-                kind = r.draw_kind if r.draw_kind in allowed else allowed[0]
+                kind = r.draw_kind if r.draw_kind in safe else safe[0]
             else:
                 act, kind = "discard", ai.choose_discard(r.hands[seat], len(r.melds[seat]), r.visible())
             if act == "discard":
@@ -423,6 +423,7 @@ class Room:
                 "stock": r.stock[me] if me is not None else {},
                 "drawKind": r.draw_kind if (me is not None and r.drawn and r.turn == me) else None,
                 "notes": r.notes[me][-6:] if me is not None else [],
+                "safeDiscards": r.opened_discards(me) if (me is not None and r.opened[me]) else [],
                 "claim": claim,
                 "result": r.result,
             }
