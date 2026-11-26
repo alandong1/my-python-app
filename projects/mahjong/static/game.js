@@ -373,8 +373,8 @@
 
     if (isMe) {
       const hand = el('div', 'tiles hand hand-wrap');
-      // 明牌之后只能打摸到的那张（托管：摸什么打什么）
-      const clickable = canDiscard() && !r.opened[view.you];
+      // 明牌之后只能打出去仍然听牌的牌
+      const clickable = canDiscard() && (!r.opened[view.you] || r.safeDiscards.includes(k));
       const handTarget = targeting && (targeting.item === 'swap' || (targeting.item === 'steal' && targeting.opp !== undefined))
         && r.phase === 'discard' && r.turn === view.you && r.drawKind !== null;
       const swapping = handTarget;

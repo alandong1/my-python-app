@@ -203,6 +203,19 @@ class Round:
             return {"fan": fan, "points": 2 ** fan, "items": items, "hand": R.expand(c)}
         return None
 
+    def _keeps_tenpai(self, seat: int, kind: int) -> bool:
+        """打出 kind 之后，seat 还是听牌（或者已经和）。"""
+        c = list(self.hands[seat])
+        if c[kind] <= 0:
+            return False
+        c[kind] -= 1
+        return R.shanten(c, len(self.melds[seat])) <= 0
+
+    def opened_discards(self, seat: int) -> List[int]:
+        """明牌之后能打的牌：打出去之后仍然听牌，并且不会让对方明牌的人点炮。"""
+        allowed = set(self.allowed_discards(seat))
+        return [k for k in allowed if self._keeps_tenpai(seat, k)]
+
     def _tenpai(self, seat: int) -> bool:
         """seat 现在的手牌打掉某一张之后能听牌（向听数为 0 或已和）。"""
         c = list(self.hands[seat])
@@ -270,8 +283,8 @@ class Round:
             raise GameError("现在不是你出牌")
         if self.hands[seat][kind] <= 0:
             raise GameError("手里没有这张牌")
-        if self.opened[seat] and kind != self.draw_kind:
-            raise GameError("明牌之后只能打摸到的那张牌")
+        if self.opened[seat] and not self._keeps_tenpai(seat, kind):
+            raise GameError("明牌之后打出的牌必须保持听牌")
         if kind not in self.allowed_discards(seat):
             raise GameError("对方已经明牌，不能故意点炮")
         self.hands[seat][kind] -= 1
